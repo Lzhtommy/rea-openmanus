@@ -148,6 +148,8 @@ async def ws(websocket: WebSocket):
                     await s.user_message(text, msg.get("attachments") or [])
             elif kind == "stop_session":
                 await s.stop()
+            elif kind == "confirm_action":
+                s.resolve_confirm(str(msg.get("actionId")), bool(msg.get("approved")))
     except WebSocketDisconnect:
         pass
     finally:

@@ -33,6 +33,8 @@ SKILLS_DIR = ROOT / "backend" / "skills"
 STATIC_DIR = ROOT / "frontend"
 
 PLANNER_ENABLED = _bool("MANUS_PLANNER", True)
+# Hold outward-facing / irreversible actions until the user approves them (Manus' need_confirm).
+CONFIRM_ENABLED = _bool("MANUS_CONFIRM", True)
 # After a task finishes, suggest follow-up requests (Manus' `suggestion` step).
 SUGGESTIONS_ENABLED = _bool("MANUS_SUGGESTIONS", True)
 # Send browser screenshots to the model as images (better grounding, more tokens).

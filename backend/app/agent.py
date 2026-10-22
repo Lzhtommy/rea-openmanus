@@ -24,7 +24,7 @@ from . import config, llm
 from .prompts import SUBAGENT_BRIEF
 from .sandbox import Sandbox, SandboxError
 from .search import search_web
-from .tools import PARALLEL_SAFE, REQUIRED, TOOL_NAMES, describe, is_allowed, ui_category
+from .tools import PARALLEL_SAFE, REQUIRED, TOOL_NAMES, describe, is_allowed, needs_confirm, ui_category
 
 log = logging.getLogger("manus.agent")
 
@@ -52,10 +52,12 @@ class AgentHost:
 
     session_id: str
     plan: list[dict]
+    approved: set[str] = set()  # actions the user already approved (Session keeps its own)
 
     async def emit(self, event: dict) -> None: ...
     async def ask_user(self, text: str, attachments: list[str], takeover: str) -> str: ...
     def drain_inbox(self) -> list[str]: return []
+    async def confirm(self, action_id: str) -> bool: return True
     def save_shot(self, b64: str) -> str: return ""
     def file_url(self, path: str) -> str: return path
     def preview_url(self, port: int) -> str: return ""
@@ -200,6 +202,10 @@ class Agent:
             outcome = ToolOutcome(f"Tool '{name}' is not available to you in this role.", is_error=True)
         elif missing := [p for p in REQUIRED[name] if p not in args]:
             outcome = ToolOutcome(f"Missing required parameter(s): {', '.join(missing)}.", is_error=True)
+        elif not await self._approved(name, args, base, silent):
+            outcome = ToolOutcome("The user declined this action, so it was not executed. Do not retry it; "
+                                  "continue another way or ask the user what they want.", is_error=True,
+                                  detail={"error": "用户拒绝了该操作"})
         else:
             try:
                 outcome = await self._dispatch(name, args, action_id, base)
@@ -214,6 +220,24 @@ class Agent:
             await self.host.emit({**base, "id": action_id, "status": "error" if outcome.is_error else "success",
                                   "detail": outcome.detail})
         return outcome
+
+    async def _approved(self, name: str, args: dict, base: dict, silent: bool) -> bool:
+        """Hold actions with outside effects until the user approves them in the UI."""
+        reason = needs_confirm(name, args) if config.CONFIRM_ENABLED else None
+        if not reason:
+            return True
+        key = f"{name}:{args.get('port') or args.get('command') or args.get('input')}"
+        if key in self.host.approved:  # same action already approved in this session
+            return True
+        await self.host.emit({**base, "id": base["actionId"], "status": "need_confirm",
+                              "confirm": {"reason": reason, "command": args.get("command") or args.get("input") or "",
+                                          "port": args.get("port")}})
+        approved = await self.host.confirm(base["actionId"])
+        if approved:
+            self.host.approved.add(key)
+        if not silent and approved:
+            await self.host.emit({**base, "id": base["actionId"], "status": "start"})
+        return approved
 
     async def _compress(self, tool_id: str, content):
         """Restorable compression: keep an excerpt in context, full text in the sandbox."""
@@ -336,8 +360,9 @@ class Agent:
         # ---- deploy
         if name == "deploy_expose_port":
             url = host.preview_url(int(a["port"]))
-            return ToolOutcome(f"Port {a['port']} exposed at {url} (the service must listen on 0.0.0.0 or "
-                               f"127.0.0.1 inside the sandbox; use relative asset paths).",
+            return ToolOutcome(f"Port {a['port']} exposed to the user at {url} . That URL is reachable by the user, not "
+                               f"from inside the sandbox: to check the page yourself, open http://localhost:{a['port']}/ "
+                               f"in the browser. Use relative asset paths so it works under the preview path.",
                                {"deploy": {"port": a["port"], "url": url}})
 
         # ---- wide research

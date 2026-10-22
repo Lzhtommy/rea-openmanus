@@ -33,6 +33,8 @@ class Session(AgentHost):
         self.plan: list[dict] = []
         self.inbox: list[str] = []
         self.pending_reply: asyncio.Future | None = None
+        self.pending_confirms: dict[str, asyncio.Future] = {}
+        self.approved: set[str] = set()
         self.task: asyncio.Task | None = None
         self.subscribers: set[asyncio.Queue] = set()
         self.dir = config.SESSIONS_DIR / sid
@@ -106,6 +108,24 @@ class Session(AgentHost):
         await self.emit({"type": "statusUpdate", "agentStatus": "running"})
         return reply
 
+    async def confirm(self, action_id: str) -> bool:
+        fut = asyncio.get_event_loop().create_future()
+        self.pending_confirms[action_id] = fut
+        await self.emit({"type": "statusUpdate", "agentStatus": "waiting", "description": "等待你确认操作"})
+        try:
+            return await fut
+        finally:
+            self.pending_confirms.pop(action_id, None)
+            if not self.pending_confirms:
+                await self.emit({"type": "statusUpdate", "agentStatus": "running"})
+
+    def resolve_confirm(self, action_id: str, approved: bool) -> bool:
+        fut = self.pending_confirms.get(action_id)
+        if not fut or fut.done():
+            return False
+        fut.set_result(approved)
+        return True
+
     def save_shot(self, b64: str) -> str:
         name = f"{short_id()}.jpg"
         (self.dir / "shots" / name).write_bytes(base64.b64decode(b64))
@@ -125,7 +145,12 @@ class Session(AgentHost):
                          "attachments": [{"path": p, "filename": p.rsplit("/", 1)[-1], "url": self.file_url(p)}
                                          for p in attachments]})
         full = text + (("\n\nAttached files (in the sandbox):\n" + "\n".join(attachments)) if attachments else "")
-        if self.pending_reply and not self.pending_reply.done():
+        if self.pending_confirms:
+            # Typing instead of approving means "no": decline the held actions and pass the message on.
+            for aid in list(self.pending_confirms):
+                self.resolve_confirm(aid, False)
+            self.inbox.append(full)
+        elif self.pending_reply and not self.pending_reply.done():
             self.pending_reply.set_result(full)
         elif self.task and not self.task.done():
             self.inbox.append(full)

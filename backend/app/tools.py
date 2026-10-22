@@ -8,6 +8,8 @@ tool list — the list is sorted and identical for every agent so the prompt cac
 
 from __future__ import annotations
 
+import re
+
 
 # Every tool takes an optional user-facing one-liner, shown as the step title in the UI
 # (Manus' `toolUsed.brief`, e.g. "检索全球无人机市场规模资料").
@@ -140,6 +142,31 @@ ROLE_DENY = {
     "main": (),
     "subagent": ("message_", "agent_"),
 }
+
+
+# Actions with effects outside the sandbox (or that destroy a lot inside it) wait for the user's
+# approval before running, like Manus' need_confirm / confirm_* flow. Shell commands are matched
+# against patterns because the shell can do anything.
+_RISKY_SHELL = [
+    (r"\bgit\s+push\b", "推送代码到远程仓库"),
+    (r"\b(npm|pnpm|yarn)\s+publish\b|\btwine\s+upload\b|\bdocker\s+push\b|\bgh\s+(release|repo|pr)\s+create\b", "发布到公共平台"),
+    (r"\bcurl\b[^|;&]*(\s-X\s*(POST|PUT|PATCH|DELETE)\b|\s(-d|--data\S*|-F|--form)\s)|\bwget\b[^|;&]*--post", "向外部服务发送数据"),
+    (r"\b(ssh|scp|rsync|sftp)\s+\S*@", "连接远程服务器"),
+    (r"\b(sendmail|mailx?|mutt)\b", "发送邮件"),
+    (r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(/|~|\$HOME|/home/ubuntu)(\s|$)|\bmkfs\b|\bdd\s+if=.*\bof=/dev/", "删除大量文件或磁盘数据"),
+]
+
+
+def needs_confirm(name: str, args: dict) -> str | None:
+    """Why this call needs the user's approval, or None."""
+    if name == "deploy_expose_port":
+        return "生成可公开访问的预览链接"
+    if name in ("shell_exec", "shell_write_to_process"):
+        text = args.get("command") or args.get("input") or ""
+        for pattern, reason in _RISKY_SHELL:
+            if re.search(pattern, text):
+                return reason
+    return None
 
 
 # Read-only tools without shared state. When every call in a turn is one of these they

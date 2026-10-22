@@ -303,6 +303,22 @@ body.pc-full #main { display: none; }
 .takeover-btn.on { background: var(--text-blue); border-color: var(--text-blue); color: #fff; }
 .takeover-btn svg.i { width: 14px; height: 14px; }
 .ask-takeover { margin-top: 10px; }
+.confirm-card { margin-top: 14px; max-width: 570px; border: 1px solid var(--border-dark); border-radius: 12px; background: var(--bg-white); overflow: hidden; box-shadow: 0 4px 16px var(--shadow-s); }
+.cc-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 0; font-size: 14px; font-weight: 500; color: var(--warning); }
+.cc-head svg.i { width: 16px; height: 16px; }
+.cc-body { padding: 8px 16px 12px; }
+.cc-reason { font-size: 14px; line-height: 20px; }
+.cc-reason span { display: block; font-size: 13px; color: var(--text-tertiary); margin-top: 2px; }
+.cc-cmd { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--bg-code); font: 12px/18px var(--font-mono); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto; }
+.cc-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border-main); background: var(--bg-card); }
+.btn { height: 32px; padding: 0 14px; border-radius: 8px; font-size: 14px; font-weight: 500; }
+.btn.primary { background: var(--send-bg); color: var(--send-icon); }
+.btn.ghost { border: 1px solid var(--border-dark); background: var(--bg-white); }
+.btn:disabled { opacity: .45; cursor: default; }
+.step.hold .step-text { color: var(--warning); }
+.step.hold .step-ico { color: var(--warning); border-color: var(--warning); }
+.step-text em { font-style: normal; font-size: 12px; margin-left: 8px; padding: 1px 6px; border-radius: 6px; background: var(--fill-dark); color: var(--text-secondary); }
+.tb-text.warn { color: var(--warning); }
 .live-badge { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-weight: 500; }
 .live-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse 1.2s ease-in-out infinite; }
 .jump-live { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; height: 38px; padding: 0 14px; border-radius: 999px; background: var(--bg-white); border: 1px solid var(--border-main); box-shadow: 0 4px 16px var(--shadow-m); font-size: 14px; font-weight: 500; }

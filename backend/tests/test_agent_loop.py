@@ -128,6 +128,7 @@ async def test_full_task(store, monkeypatch):
     ])
     monkeypatch.setattr(llm, "agent_step", model)
     monkeypatch.setattr(config, "BROWSER_VISION", True)
+    monkeypatch.setattr(config, "CONFIRM_ENABLED", False)  # covered by test_confirmation
 
     s = store.create()
     await s.user_message("请做一个测试任务", [])
@@ -244,6 +245,44 @@ async def test_stop_repairs_history(store, monkeypatch):
     assert_valid_history(s.messages)
     sb = await manager.get(s.session_id)
     await sb.call("/shell/kill", {"id": "slow"})
+
+
+@pytest.mark.asyncio
+async def test_confirmation(store, monkeypatch):
+    """Outward-facing actions wait for approval; declining returns an error to the model."""
+    model = ScriptedModel([
+        msg(tool("deploy_expose_port", port=18432)),
+        msg(tool("shell_exec", command="git push origin main")),
+        lambda m: msg(tool("message_notify_user", text=str(m[-1]["content"][0].get("is_error")))),
+        msg(tool("idle")),
+    ])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("deploy and push", [])
+
+    async def held(name):
+        for _ in range(100):
+            ev = next((e for e in s.events if e["type"] == "toolUsed" and e.get("name") == name
+                       and e["status"] == "need_confirm"), None)
+            if ev and s.pending_confirms:
+                return ev
+            await asyncio.sleep(0.1)
+        raise AssertionError(f"{name} was not held for confirmation")
+
+    dep = await held("deploy_expose_port")
+    assert s.status == "waiting" and dep["confirm"]["reason"]
+    assert s.resolve_confirm(dep["actionId"], True)
+    push = await held("shell_exec")
+    assert "git push" in push["confirm"]["command"]
+    assert s.resolve_confirm(push["actionId"], False)
+    await wait_status(s, {"idle"})
+
+    done = {e["name"]: e["status"] for e in s.events if e["type"] == "toolUsed" and e["status"] in ("success", "error")
+            and e["tool"] != "suggestion"}
+    assert done == {"deploy_expose_port": "success", "shell_exec": "error"}
+    notes = [e["content"] for e in s.events if e["type"] == "chat" and e["sender"] == "assistant"]
+    assert notes[-1] == "True"  # the declined push reached the model as an error
+    assert_valid_history(s.messages)
 
 
 def teardown_module():

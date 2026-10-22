@@ -230,7 +230,10 @@ function renderAll() {
   stickBottom = false;
 }
 
-const isFinished = (t) => t.status !== "running";
+// Steps held for the user's approval (Manus' need_confirm). While one is pending the turn is still in
+// progress even though the agent status is "waiting".
+const pendingConfirms = (t) => S.steps.filter((s) => s.turn === t && s.status === "need_confirm");
+const isFinished = (t) => t.status !== "running" && !(t.status === "waiting" && pendingConfirms(t).length);
 
 // Index where the turn's result starts: the last chat marked deliveryKind "result", else the run of
 // chat messages after the last step group. Everything before it lives in the collapsible work log.
@@ -265,6 +268,7 @@ function renderTurn(t) {
       if (open) h += `<div class="worklog">${logItems.map((it) => itemHtml(t, it, running && it === t.items[t.items.length - 1])).join("")}</div>`;
     }
     if (running && isLast && S.status !== "waiting") h += liveLineHtml(t);
+    h += pendingConfirms(t).map(confirmHtml).join("");
     if (finalItems.length) h += `<div class="final">${finalItems.map((it) => (it.kind === "chat" ? chatHtml(it.ev, true) : itemHtml(t, it, false))).join("")}</div>`;
     if (isFinished(t)) h += doneRowHtml(t, fi);
     if (t.suggestions?.length && isLast) h += `<div class="suggestions">${t.suggestions.map((c, i) =>
@@ -309,6 +313,7 @@ function stepText(s) {
 function stepHtml(s) {
   const meta = TOOL[s.tool] || { icon: "list" };
   const running = s.status === "start" || s.status === "running";
+  if (s.status === "need_confirm") return `<button class="step hold" data-act="step" data-id="${esc(s.actionId)}"><span class="step-ico">${icon("alert")}</span><span class="step-text">${stepText(s)}<em>等待确认</em></span></button>`;
   const editFile = s.tool === "text_editor" && /write|str_replace/.test(s.name || "");
   const ico = editFile ? `<span class="step-ico file">${icon("fileDoc")}</span>` : `<span class="step-ico ${meta.round ? "round" : ""}">${icon(meta.icon)}</span>`;
   const sel = S.panel.open && selectedStep()?.actionId === s.actionId;
@@ -343,6 +348,15 @@ function summarize(steps) {
   if (c.mr) parts.push(`并行执行了 ${c.mr} 批子任务`);
   if (c.dep) parts.push(`部署了 ${c.dep} 个服务`);
   return parts.join(" · ") || `执行了 ${steps.length} 个步骤`;
+}
+
+function confirmHtml(s) {
+  const c = s.confirm || {};
+  const detail = c.command ? `<pre class="cc-cmd">${esc(c.command)}</pre>` : c.port ? `<pre class="cc-cmd">端口 ${esc(c.port)}</pre>` : "";
+  return `<div class="confirm-card"><div class="cc-head">${icon("alert")}OpenManus 需要你的确认</div>` +
+    `<div class="cc-body"><div class="cc-reason">${esc(s.brief || zh(s.message?.action))}<span>${esc(c.reason || "")}</span></div>${detail}</div>` +
+    `<div class="cc-actions"><button class="btn ghost" data-act="confirm" data-id="${esc(s.actionId)}" data-ok="0" ${s._answered ? "disabled" : ""}>拒绝</button>` +
+    `<button class="btn primary" data-act="confirm" data-id="${esc(s.actionId)}" data-ok="1" ${s._answered ? "disabled" : ""}>允许执行</button></div></div>`;
 }
 
 function liveLineHtml(t) {
@@ -412,7 +426,7 @@ function renderTaskbar() {
   if (S.status === "running") {
     const txt = last && (last.status === "start" || last.status === "running") ? (last.brief || `${zh(last.message?.action)} ${last.message?.param || ""}`) : liveText(S.live);
     text = `<span class="tb-text"><span class="shimmer">${esc(txt)}</span></span>`;
-  } else if (S.status === "waiting") text = `<span class="tb-text">${icon("hand")}等待你的回复</span>`;
+  } else if (S.status === "waiting") text = t && pendingConfirms(t).length ? `<span class="tb-text warn">${icon("alert")}等待你确认操作</span>` : `<span class="tb-text">${icon("hand")}等待你的回复</span>`;
   else if (S.status === "error") text = `<span class="tb-text err">${icon("alert")}任务出错</span>`;
   else if (S.status === "stopped") text = `<span class="tb-text">${icon("stop")}任务已停止</span>`;
   else text = `<span class="tb-text ok">${icon("check")}任务已完成</span>`;
@@ -491,7 +505,7 @@ function renderPanel() {
   const foot = $("#pc-foot");
   foot.className = "pc-foot";
   if (running) { const s = S.steps[n - 1]; foot.innerHTML = `<span class="shimmer">${esc(s && (s.status === "start" || s.status === "running") ? (s.brief || `${zh(s.message?.action)} ${s.message?.param || ""}`) : liveText(S.live))}</span>`; }
-  else if (S.status === "waiting") foot.innerHTML = `${icon("hand")}等待你的回复`;
+  else if (S.status === "waiting") foot.innerHTML = lastTurn() && pendingConfirms(lastTurn()).length ? `${icon("alert")}等待你确认操作` : `${icon("hand")}等待你的回复`;
   else if (S.status === "error") { foot.classList.add("err"); foot.innerHTML = `${icon("alert")}任务出错`; }
   else if (S.status === "stopped") foot.innerHTML = `${icon("stop")}任务已停止`;
   else { foot.classList.add("ok"); foot.innerHTML = `${icon("check")}任务已完成`; }
@@ -499,6 +513,7 @@ function renderPanel() {
 
 function stepView(s) {
   const d = s.detail || {};
+  if (s.status === "need_confirm") return `<div class="pc-empty">${icon("alert")}<span>等待你确认：${esc(s.confirm?.reason || "")}</span>${s.confirm?.command ? `<pre class="cc-cmd" style="max-width:80%">${esc(s.confirm.command)}</pre>` : ""}</div>`;
   if (d.terminal) return termHtml(d.terminal);
   if (d.browser?.screenshot) return `<img class="shot" src="${esc(d.browser.screenshot)}" alt="" />`;
   if (d.browser?.console) return `<div class="term">${esc(d.browser.console)}</div>`;
@@ -699,6 +714,14 @@ function bind() {
       case "open-file": if (e.target.closest("a[download]")) return; S.panel.open = true; S.panel.userClosed = false; S.panel.file = { url: a.dataset.url, name: a.dataset.name, path: a.dataset.path }; refreshSel(); break;
       case "plan": e.stopPropagation(); S.planOpen = !S.planOpen; renderTaskbar(); return;
       case "takeover": toggleTakeover(); break;
+      case "confirm": {
+        const s = S.steps[S.stepIdx[a.dataset.id]];
+        if (!s || s._answered) break;
+        s._answered = true;
+        send({ type: "confirm_action", sessionId: S.current, actionId: a.dataset.id, approved: a.dataset.ok === "1" });
+        rerender(s.turn);
+        break;
+      }
     }
   });
   $("#taskbar").addEventListener("click", (e) => { if (!e.target.closest("[data-act]") && !e.target.closest(".plan-pop")) { S.panel.open = true; S.panel.userClosed = false; S.panel.sel = null; S.panel.file = null; scheduleRender(); } });
