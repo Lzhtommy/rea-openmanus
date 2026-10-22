@@ -6,13 +6,18 @@
 
 ## 功能
 - **Agent Loop**：分析事件 → 选择工具 → 沙箱执行 → 观察 → 迭代 → 交付 → idle
-- **30 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`、`info_extract_webpage`、`deploy_expose_port`、`message_*`、`plan_update`、`agent_map_reduce`、`idle`
+- **31 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`、`info_extract_webpage`、`deploy_expose_port`、`message_*`、`plan_update`、`agent_map_reduce`、`schedule_create`、`idle`
 - **并行工具调用**：一轮里如果全是只读调用（搜索、网页提取、读文件），就并发执行
 - **Planner 模块**：结构化输出生成计划；**Skills**：`backend/skills/<name>/SKILL.md` 装进沙箱，上下文里只放目录，Agent 按需读取
 - **交付语义**：`chat.deliveryKind` 分为 `opening` / `progress` / `result`；任务结束后生成追问建议（`suggestion` 步骤）
 - **Wide Research**：`agent_map_reduce` 并行派发同构子代理
 - **上下文工程**：静态前缀加 prompt caching、只追加的历史、按前缀遮蔽工具、可恢复压缩（大观察结果落盘到沙箱）、错误保留、计划复述
-- **沙箱**：每会话一个 Docker 容器（Ubuntu + Python + Node + Chromium），通过动作 API 控制；端口预览代理
+- **沙箱**：每会话一个 Docker 容器（Ubuntu + Python + Node + Chromium），通过动作 API 控制；端口预览代理；与服务器同一时区
+- **实时画面与接管**：浏览器跑在 Xvfb 虚拟显示器上，经 VNC 实时推到"电脑"面板（noVNC）；用户可一键接管浏览器（登录、验证码），结束后交还 Agent
+- **操作确认**：部署、推送代码、发布、对外发送数据、远程登录、大范围删除等操作会挂起（`need_confirm`），用户允许后才执行，拒绝则作为错误返回模型
+- **流式输出**：回复和 `message_*` 的文本边生成边推送（`chatDelta`）
+- **文件持久化与资料库**：Agent 写入/交付的文件和用户上传都另存到会话目录，容器删除后仍可下载；"资料库"跨任务浏览、筛选、预览
+- **自动化（定时任务）**：仅一次 / 按间隔 / 每天 / 每周，到点自动新建任务运行；可在"自动化"页面管理，也可在对话里让 Agent 用 `schedule_create` 创建
 - **界面**：按 Manus 2.0 网页端还原（用 REA/CDP 实测的布局、设计变量和交互）：可折叠的工作日志与步骤分组、结果文件卡片与预览、追问建议、带时间轴回放的"电脑"面板、计划进度条、浅色/深色主题
 - **实时协议**：WebSocket 上传输 Manus 同构事件（`chat`/`toolUsed`/`planUpdate`/`statusUpdate`），支持断线续传、运行中追加消息、向用户提问、停止后恢复
 - **模型**：通过 LiteLLM 网关以 OpenAI chat completions 协议调用（默认 `claude-opus-5-5`）；`reasoning_effort` 映射为自适应思考，签名思考块在工具调用间回传，`cache_control` 做提示缓存
@@ -48,6 +53,8 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 | `MANUS_SANDBOX` | `docker` | `docker` 或 `local` |
 | `MANUS_SANDBOX_MEMORY` / `MANUS_SANDBOX_CPUS` | `4g` / `2` | 容器资源限制 |
 | `MANUS_PLANNER` | `true` | 是否启用 Planner 模块 |
+| `MANUS_CONFIRM` | `true` | 有外部影响的操作是否需要用户确认 |
+| `MANUS_SANDBOX_TZ` | 服务器时区 | 沙箱时区（POSIX TZ，例如 `<+08>-8`） |
 | `MANUS_SUGGESTIONS` | `true` | 任务结束后是否生成追问建议 |
 | `MANUS_BROWSER_VISION` | `true` | 是否把浏览器截图发给模型 |
 | `MANUS_OBSERVATION_LIMIT` | `12000` | 观察结果超过这个字符数就落盘压缩 |
@@ -66,6 +73,7 @@ backend/app/
   sandbox.py    沙箱生命周期（Docker / 本地）和动作 API 客户端
   search.py     网页搜索（Tavily / DuckDuckGo）
   skills.py     Skills 目录加载、装入沙箱
+  scheduler.py  定时任务（下次运行时间计算、后台循环、按计划新建会话）
 backend/skills/     Skills（<name>/SKILL.md）
 backend/tests/      端到端测试（脚本化模型，不需要 API key）
 sandbox/            沙箱镜像（Dockerfile）和沙箱内动作 API 服务（server.py）

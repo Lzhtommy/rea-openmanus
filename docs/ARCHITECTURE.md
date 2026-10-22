@@ -184,8 +184,17 @@
 | `sandboxUpdate` | 同名事件（没有 VNC 地址） |
 
 ## 4. 有意没有复刻的部分
-webdev 全栈托管（自定义域名、Stripe 等）、Connectors 和 MCP 市场、定时任务、Slides/图片/视频生成、桌面端 My Computer、多人协作和团队计费。
-⚡ 运行时看到但同样没做的：VNC/WebRTC 实时画面（本仓库用截图）、工具按需发现、`cascadeTaskClock` 计费、通知 socket、前端 IndexedDB 事件缓存（本仓库靠 `lastSeq` 补发）。
+webdev 全栈托管（自定义域名、Stripe 等）、Connectors 和 MCP 市场、Slides/图片/视频生成、桌面端 My Computer、多人协作和团队计费。
+⚡ 运行时看到但同样没做的：工具按需发现、`cascadeTaskClock` 计费、通知 socket、前端 IndexedDB 事件缓存（本仓库靠 `lastSeq` 补发）。
+
+后来补上的（对照 Manus 的同类机制）：
+| Manus | 本仓库 |
+|---|---|
+| `sandboxUpdate.vncUrl` 实时画面 + 用户接管 | 沙箱内 Xvfb + x11vnc，动作 API 的 `/vnc` 桥接，后端 `/api/sessions/<id>/vnc` 转发，前端 noVNC；`message_ask_user(suggest_user_takeover=browser)` 时可接管 |
+| `toolUsed.status: need_confirm` + `confirm_*` | `tools.needs_confirm` 规则（部署、git push、发布、对外 POST、远程登录、邮件、大范围删除），`confirm_action` 消息，拒绝作为错误结果返回模型 |
+| `chatDelta` 流式文本 | 网关流式输出，从 `message_*` 的部分 JSON 参数里实时解析 `text`，按 `streamId` 被最终 `chat` 替换 |
+| 沙箱文件同步到 `sessionFile/...`、资料库 | 写入/交付/上传的文件另存到 `data/sessions/<id>/files`，下载优先实时、回退副本；`/api/library` 与"资料库"页面 |
+| `ScheduledTask` / 自动化 | `scheduler.py`（once/interval/daily/weekly），`/api/schedules`、`schedule_create` 工具、"自动化"页面 |
 这些都是在同一个 Agent 内核上叠加的业务功能，事件协议里已预留扩展点（`toolUsed.tool` 新增类别即可）。
 
 ## 5. 证据索引
