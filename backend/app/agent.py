@@ -55,7 +55,7 @@ class AgentHost:
     approved: set[str] = set()  # actions the user already approved (Session keeps its own)
 
     async def emit(self, event: dict) -> None: ...
-    async def ask_user(self, text: str, attachments: list[str], takeover: str) -> str: ...
+    async def ask_user(self, text: str, attachments: list[str], takeover: str, stream_id: str = "") -> str: ...
     def drain_inbox(self) -> list[str]: return []
     async def confirm(self, action_id: str) -> bool: return True
     def save_shot(self, b64: str) -> str: return ""
@@ -76,6 +76,7 @@ class Agent:
         self.result: str | None = None  # sub-agent deliverable
         self.plan_step_id: str | None = None
         self.opened = False  # first user-facing message of a run is the "opening" delivery
+        self._delta_at: dict[str, float] = {}
 
     # ------------------------------------------------------------ loop ---
 
@@ -85,8 +86,10 @@ class Agent:
             self._inject_inbox()
             if self.role == "main":
                 await self.host.emit({"type": "liveStatus", "text": "Thinking"})
+            text_id = f"txt-{short_id()}"
             try:
-                resp = await llm.agent_step(self.messages, self.effort)
+                resp = await llm.agent_step(self.messages, self.effort, on_delta=self._on_delta if self.role == "main" else None,
+                                            text_id=text_id)
             except llm.BadRequestError as e:
                 await self._error(f"LLM request rejected: {e.message}")
                 return
@@ -115,8 +118,8 @@ class Agent:
                 # Plain-text answer: surface it and stop (it is the final reply).
                 text = "".join(b.text for b in resp.content if b.type == "text").strip()
                 if text and self.role == "main":
-                    await self.host.emit({"type": "chat", "sender": "assistant", "messageType": "text",
-                                          "content": text, "attachments": [], "deliveryKind": "result"})
+                    await self.host.emit({"type": "chat", "sender": "assistant", "messageType": "text", "content": text,
+                                          "attachments": [], "deliveryKind": "result", "streamId": text_id})
                 if self.role == "subagent":
                     self.result = text
                 self.host.persist()
@@ -137,6 +140,14 @@ class Agent:
             if stop:
                 return
         await self._error(f"Stopped after {config.MAX_ITERATIONS} iterations.")
+
+    def _on_delta(self, stream_id: str, text: str) -> None:
+        """Forward streamed user-facing text as ephemeral chatDelta events (throttled)."""
+        now = time.monotonic()
+        if now - self._delta_at.get(stream_id, 0) < 0.06:
+            return
+        self._delta_at[stream_id] = now
+        asyncio.get_running_loop().create_task(self.host.emit({"type": "chatDelta", "streamId": stream_id, "content": text}))
 
     def repair_history(self) -> None:
         """After a cancel/crash, close any tool_use left without results."""
@@ -264,11 +275,12 @@ class Agent:
             kind = a.get("kind") or ("progress" if self.opened else "opening")
             self.opened = True
             await host.emit({"type": "chat", "sender": "assistant", "messageType": "text", "content": a["text"],
-                             "attachments": self._attachments(a.get("attachments")), "deliveryKind": kind})
+                             "attachments": self._attachments(a.get("attachments")), "deliveryKind": kind,
+                             "streamId": action_id})
             return ToolOutcome("Message delivered to the user.")
         if name == "message_ask_user":
             reply = await host.ask_user(a["text"], self._attachments(a.get("attachments")),
-                                        a.get("suggest_user_takeover", "none"))
+                                        a.get("suggest_user_takeover", "none"), stream_id=action_id)
             return ToolOutcome(f"User replied: {reply}")
 
         # ---- plan

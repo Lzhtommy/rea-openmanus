@@ -4,7 +4,9 @@ import os
 
 os.environ.setdefault("MANUS_LLM_API_KEY", "test")
 
-from openai.types.chat import ChatCompletion  # noqa: E402
+import asyncio  # noqa: E402
+
+from openai.types.chat import ChatCompletion, ChatCompletionChunk  # noqa: E402
 
 from app import llm  # noqa: E402
 
@@ -57,3 +59,27 @@ def test_reply_from_chat():
     stored = {"role": "assistant", "content": [b.model_dump(mode="json", exclude_none=True) for b in r.content]}
     back = llm._to_chat([stored])[0]
     assert back["thinking_blocks"][0]["signature"] == "s" and len(back["tool_calls"]) == 2
+
+
+def test_stream_accumulate():
+    def chunk(delta, finish=None):
+        return ChatCompletionChunk.model_validate({"id": "c", "object": "chat.completion.chunk", "created": 0, "model": "m",
+                                                   "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+    args = '{"text": "你好，世界", "kind": "result"}'
+    parts = [chunk({"role": "assistant", "thinking_blocks": [{"type": "thinking", "thinking": "hm"}]}),
+             chunk({"thinking_blocks": [{"type": "thinking", "thinking": "m", "signature": "sig"}]}),
+             chunk({"tool_calls": [{"index": 0, "id": "call_1", "type": "function",
+                                    "function": {"name": "message_notify_user", "arguments": ""}}]})]
+    parts += [chunk({"tool_calls": [{"index": 0, "function": {"arguments": args[i:i + 3]}}]}) for i in range(0, len(args), 3)]
+    parts.append(chunk({}, "tool_calls"))
+
+    async def gen():
+        for c in parts:
+            yield c
+
+    seen = []
+    r = asyncio.run(llm._accumulate(gen(), lambda sid, t: seen.append((sid, t)), "txt"))
+    assert r.stop_reason == "tool_use"
+    assert r.content[0].thinking == "hmm" and r.content[0].signature == "sig"
+    assert r.content[1].input == {"text": "你好，世界", "kind": "result"}
+    assert seen[-1] == ("call_1", "你好，世界") and len(seen) > 1 and all(s == "call_1" for s, _ in seen)

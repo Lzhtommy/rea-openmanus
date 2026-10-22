@@ -44,8 +44,19 @@ class ScriptedModel:
         self.script = list(script)
         self.calls = []
 
-    async def __call__(self, messages, effort):
+    async def __call__(self, messages, effort, on_delta=None, text_id="text"):
         self.calls.append([m["role"] for m in messages])
+        reply = await self._next(messages)
+        if on_delta and reply is not None:  # simulate streaming of user-facing text
+            for b in reply.content:
+                if b.type == "tool_use" and b.name == "message_notify_user":
+                    text = b.input["text"]
+                    for n in range(1, len(text) + 1):
+                        on_delta(b.id, text[:n])
+                        await asyncio.sleep(0.07)
+        return reply
+
+    async def _next(self, messages):
         first = messages[0]["content"]
         if isinstance(first, str) and "sub-agent" in first:
             item = first.split("Your item: ")[1].split("\n")[0]
@@ -283,6 +294,26 @@ async def test_confirmation(store, monkeypatch):
     notes = [e["content"] for e in s.events if e["type"] == "chat" and e["sender"] == "assistant"]
     assert notes[-1] == "True"  # the declined push reached the model as an error
     assert_valid_history(s.messages)
+
+
+@pytest.mark.asyncio
+async def test_streaming_deltas(store, monkeypatch):
+    """User-facing text streams as ephemeral chatDelta events keyed to the final chat's streamId."""
+    model = ScriptedModel([msg(tool("message_notify_user", text="流式输出测试")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    q: asyncio.Queue = asyncio.Queue()
+    s.subscribers.add(q)
+    await s.user_message("stream please", [])
+    await wait_status(s, {"idle"})
+    seen = []
+    while not q.empty():
+        seen.append(q.get_nowait()["event"])
+    deltas = [e for e in seen if e["type"] == "chatDelta"]
+    chat = next(e for e in s.events if e["type"] == "chat" and e["sender"] == "assistant")
+    assert deltas and all(d["streamId"] == chat["streamId"] for d in deltas)
+    assert all(chat["content"].startswith(d["content"]) for d in deltas) and len(deltas) >= 3
+    assert not any(e["type"] == "chatDelta" for e in s.events)  # ephemeral, never persisted
 
 
 def teardown_module():

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import openai
@@ -65,30 +67,117 @@ _STOP = {"stop": "end_turn", "tool_calls": "tool_use", "function_call": "tool_us
          "content_filter": "refusal"}
 
 
+def _blocks(thinking: list[dict], reasoning: str, content: str, calls: list[tuple[str, str, str]],
+            finish: str | None) -> Reply:
+    """Assemble a reply from its parts (shared by the streaming and non-streaming paths)."""
+    blocks: list[Block] = []
+    for t in thinking:
+        if t.get("type", "thinking") == "thinking" and t.get("thinking"):
+            blocks.append(Block(type="thinking", thinking=t["thinking"], signature=t.get("signature")))
+    if not blocks and reasoning:
+        blocks.append(Block(type="thinking", thinking=reasoning))
+    if content:
+        blocks.append(Block(type="text", text=content))
+    for call_id, name, arguments in calls:
+        try:
+            args = json.loads(arguments or "{}")
+        except json.JSONDecodeError:
+            args = {"_unparsed_arguments": arguments}  # fails validation; the model sees why
+        blocks.append(Block(type="tool_use", id=call_id, name=name,
+                            input=args if isinstance(args, dict) else {"_unparsed_arguments": args}))
+    stop = _STOP.get(finish or "stop", "end_turn")
+    if calls and stop == "end_turn":
+        stop = "tool_use"  # some providers report "stop" alongside tool calls
+    return Reply(content=blocks, stop_reason=stop)
+
+
 def _reply(resp) -> Reply:
     choice = resp.choices[0]
     msg = choice.message
     extra = msg.model_extra or {}
-    blocks: list[Block] = []
-    thinking = extra.get("thinking_blocks") or []
-    for t in thinking:
-        if t.get("type") == "thinking" and t.get("thinking"):
-            blocks.append(Block(type="thinking", thinking=t["thinking"], signature=t.get("signature")))
-    if not thinking and extra.get("reasoning_content"):
-        blocks.append(Block(type="thinking", thinking=extra["reasoning_content"]))
-    if msg.content:
-        blocks.append(Block(type="text", text=msg.content))
-    for tc in msg.tool_calls or []:
-        try:
-            args = json.loads(tc.function.arguments or "{}")
-        except json.JSONDecodeError:
-            args = {"_unparsed_arguments": tc.function.arguments}  # fails validation; the model sees why
-        blocks.append(Block(type="tool_use", id=tc.id, name=tc.function.name,
-                            input=args if isinstance(args, dict) else {"_unparsed_arguments": args}))
-    stop = _STOP.get(choice.finish_reason or "stop", "end_turn")
-    if msg.tool_calls and stop == "end_turn":
-        stop = "tool_use"  # some providers report "stop" alongside tool calls
-    return Reply(content=blocks, stop_reason=stop)
+    calls = [(tc.id, tc.function.name, tc.function.arguments) for tc in msg.tool_calls or []]
+    return _blocks(extra.get("thinking_blocks") or [], extra.get("reasoning_content") or "", msg.content or "",
+                   calls, choice.finish_reason)
+
+
+# ------------------------------------------------------------- streaming ---
+# Text the user will see is streamed as it is generated (Manus' chatDelta): the final answer
+# when the model replies in plain text, and the `text` argument of message_* tool calls, read
+# out of the partial JSON arguments while they arrive.
+
+STREAMED_TOOLS = {"message_notify_user", "message_ask_user"}
+_TEXT_KEY = re.compile(r'"text"\s*:\s*"')
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f"}
+
+Delta = Callable[[str, str], None]  # (stream id, text so far)
+
+
+def partial_text(arguments: str) -> str | None:
+    """The (possibly unfinished) value of "text" in a partial JSON object, or None if not started."""
+    m = _TEXT_KEY.search(arguments)
+    if not m:
+        return None
+    s, out, i = arguments[m.end():], [], 0
+    while i < len(s):
+        c = s[i]
+        if c == '"':
+            break
+        if c == "\\":
+            if i + 1 >= len(s):
+                break
+            n = s[i + 1]
+            if n == "u":
+                if i + 6 > len(s):
+                    break
+                out.append(chr(int(s[i + 2:i + 6], 16)))
+                i += 6
+                continue
+            out.append(_ESCAPES.get(n, n))
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out).encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+
+
+async def _accumulate(chunks: AsyncIterator, on_delta: Delta | None, text_id: str) -> Reply:
+    content, reasoning, finish = "", "", None
+    thinking: list[dict] = []
+    calls: dict[int, dict] = {}
+    shown: dict[str, str] = {}
+
+    def push(stream_id: str, text: str | None):
+        if on_delta and text and shown.get(stream_id) != text:
+            shown[stream_id] = text
+            on_delta(stream_id, text)
+
+    async for chunk in chunks:
+        if not chunk.choices:
+            continue
+        choice = chunk.choices[0]
+        finish = choice.finish_reason or finish
+        d = choice.delta
+        extra = d.model_extra or {}
+        reasoning += extra.get("reasoning_content") or ""
+        for tb in extra.get("thinking_blocks") or []:
+            if not thinking or thinking[-1].get("signature"):
+                thinking.append({"type": "thinking", "thinking": ""})
+            thinking[-1]["thinking"] += tb.get("thinking") or ""
+            if tb.get("signature"):
+                thinking[-1]["signature"] = tb["signature"]
+        if d.content:
+            content += d.content
+            push(text_id, content)
+        for tc in d.tool_calls or []:
+            c = calls.setdefault(tc.index, {"id": "", "name": "", "args": ""})
+            c["id"] = tc.id or c["id"]
+            if tc.function:
+                c["name"] += tc.function.name or ""
+                c["args"] += tc.function.arguments or ""
+            if c["name"] in STREAMED_TOOLS and c["id"]:
+                push(c["id"], partial_text(c["args"]))
+    ordered = [(c["id"], c["name"], c["args"]) for _, c in sorted(calls.items())]
+    return _blocks(thinking, reasoning, content, ordered, finish)
 
 
 # --------------------------------------------------------------- request ---
@@ -190,14 +279,21 @@ def _common(effort: str | None) -> dict:
     return kw
 
 
-async def agent_step(messages: list[dict], effort: str) -> Reply:
-    """One agent-loop iteration: the model selects the next tool call(s)."""
+async def agent_step(messages: list[dict], effort: str, on_delta: Delta | None = None,
+                     text_id: str = "text") -> Reply:
+    """One agent-loop iteration: the model selects the next tool call(s).
+
+    With on_delta, the reply is streamed and user-facing text is reported as it arrives
+    (stream id = the message tool call's id, or text_id for a plain-text answer).
+    """
     chat = [_system(SYSTEM_PROMPT)] + _to_chat(messages)
     if config.PROMPT_CACHE:
         _cache_tail(chat)
-    resp = await client().chat.completions.create(
-        messages=chat, tools=CHAT_TOOLS, tool_choice="auto", max_tokens=config.MAX_TOKENS, **_common(effort))
-    return _reply(resp)
+    kw = dict(messages=chat, tools=CHAT_TOOLS, tool_choice="auto", max_tokens=config.MAX_TOKENS, **_common(effort))
+    if on_delta is None:
+        return _reply(await client().chat.completions.create(**kw))
+    stream = await client().chat.completions.create(**kw, stream=True)
+    return await _accumulate(stream, on_delta, text_id)
 
 
 _json_schema_ok = True  # flips off once the gateway model rejects json_schema (e.g. DeepSeek)

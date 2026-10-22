@@ -71,7 +71,7 @@ class Session(AgentHost):
 
     async def emit(self, event: dict) -> None:
         event = {**event, "id": event.get("id") or short_id(), "timestamp": now_ms(), "seq": len(self.events)}
-        if event["type"] == "liveStatus":  # ephemeral: broadcast, don't log
+        if event["type"] in ("liveStatus", "chatDelta"):  # ephemeral: broadcast, don't log
             self._broadcast(event)
             return
         if event["type"] == "statusUpdate":
@@ -96,9 +96,9 @@ class Session(AgentHost):
         msgs, self.inbox = self.inbox, []
         return msgs
 
-    async def ask_user(self, text: str, attachments: list[dict], takeover: str) -> str:
+    async def ask_user(self, text: str, attachments: list[dict], takeover: str, stream_id: str = "") -> str:
         await self.emit({"type": "chat", "sender": "assistant", "messageType": "ask", "content": text,
-                         "attachments": attachments, "takeover": takeover})
+                         "attachments": attachments, "takeover": takeover, "streamId": stream_id})
         await self.emit({"type": "statusUpdate", "agentStatus": "waiting", "description": "Waiting for your reply"})
         self.pending_reply = asyncio.get_event_loop().create_future()
         try:

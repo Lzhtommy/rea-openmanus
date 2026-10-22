@@ -98,14 +98,14 @@ const zh = (a) => ACTION_ZH[a] || a || "";
 const S = {
   sessions: [], cfg: {}, current: null, ws: null, lastSeq: {}, replaying: false, filter: "",
   title: "", status: "idle", live: "", plan: [], planOpen: false,
-  turns: [], steps: [], stepIdx: {}, dirty: new Set(),
+  turns: [], steps: [], stepIdx: {}, dirty: new Set(), finalized: new Set(),
   panel: { open: false, userClosed: false, sel: null, file: null, full: false, takeover: false },
   vnc: false, vncFailed: false,
   attachments: [], previews: {},
 };
 
 function resetSession() {
-  Object.assign(S, { title: "", status: "idle", live: "", plan: [], planOpen: false, turns: [], steps: [], stepIdx: {}, dirty: new Set(), vnc: false, vncFailed: false });
+  Object.assign(S, { title: "", status: "idle", live: "", plan: [], planOpen: false, turns: [], steps: [], stepIdx: {}, dirty: new Set(), finalized: new Set(), vnc: false, vncFailed: false });
   S.panel = { open: false, userClosed: false, sel: null, file: null, full: false, takeover: false };
   vncDisconnect();
   $("#thread").innerHTML = "";
@@ -155,7 +155,18 @@ function apply(ev) {
     case "chat": {
       if (ev.sender === "user") { S.dirty.add(newTurn(ev, ev.timestamp)); break; }
       const t = ensureTurn(ev.timestamp);
-      t.items.push({ kind: "chat", ev });
+      // the finished message replaces its streaming draft in place
+      const si = ev.streamId ? t.items.findIndex((it) => it.kind === "stream" && it.id === ev.streamId) : -1;
+      if (ev.streamId) S.finalized.add(ev.streamId);
+      if (si >= 0) t.items[si] = { kind: "chat", ev }; else t.items.push({ kind: "chat", ev });
+      S.dirty.add(t);
+      break;
+    }
+    case "chatDelta": {
+      if (S.finalized.has(ev.streamId)) return;
+      const t = ensureTurn(ev.timestamp);
+      const it = t.items.find((x) => x.kind === "stream" && x.id === ev.streamId);
+      if (it) it.text = ev.content; else t.items.push({ kind: "stream", id: ev.streamId, text: ev.content });
       S.dirty.add(t);
       break;
     }
@@ -290,6 +301,7 @@ function userHtml(ev) {
 
 function itemHtml(t, it, isCurrent) {
   if (it.kind === "chat") return chatHtml(it.ev, false);
+  if (it.kind === "stream") return `<div class="narr streaming"><div class="prose">${md(it.text)}</div></div>`;
   const steps = it.steps.map((id) => S.steps[S.stepIdx[id]]).filter(Boolean);
   const open = t.groupOpen[it.id] ?? (isCurrent && !isFinished(t));
   return `<div class="group ${open ? "open" : ""}"><button class="group-sum" data-act="toggle-group" data-turn="${t.id}" data-group="${it.id}">${esc(summarize(steps))}${icon("chevDown", "chev")}</button>` +
@@ -362,6 +374,7 @@ function confirmHtml(s) {
 function liveLineHtml(t) {
   // a running step already shimmers in its own row; the live line only covers "thinking" gaps
   if (S.steps.some((s) => s.turn === t && (s.status === "start" || s.status === "running"))) return "";
+  if (t.items[t.items.length - 1]?.kind === "stream") return ""; // text is already streaming in
   return `<div class="live-line"><span class="live-dot"></span><span class="shimmer">${esc(liveText(S.live))}</span></div>`;
 }
 const liveText = (t) => ({ Thinking: "思考中", Planning: "正在规划任务" }[t] || t || "思考中");
