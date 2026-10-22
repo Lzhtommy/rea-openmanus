@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -317,33 +317,55 @@ TEXT_JS = r"""
 """
 
 
+# With a display (Docker image: Xvfb on :99, exported over VNC) the agent's browser runs headed so the
+# user can watch it live and take over; without one (local dev) it runs headless.
+HEADED = bool(os.environ.get("DISPLAY"))
+SCREEN = {"width": 1280, "height": 900}
+
+
 class Browser:
     def __init__(self):
         self.pw = None
         self.browser = None
+        self.background = None  # headless, for page extraction off-screen
         self.page = None
         self.console: list[str] = []
         self.lock = asyncio.Lock()  # serializes actions on the shared, user-visible page
         self.launch_lock = asyncio.Lock()
 
-    async def launch(self):
+    async def _playwright(self):
         try:
             from playwright.async_api import async_playwright
         except ImportError:
             raise HTTPException(501, "playwright not installed in this sandbox")
         if not self.pw:
             self.pw = await async_playwright().start()
+        return self.pw
+
+    async def launch(self):
+        pw = await self._playwright()
         if not self.browser or not self.browser.is_connected():
-            self.browser = await self.pw.chromium.launch(
-                headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            args = ["--no-sandbox", "--disable-dev-shm-usage"]
+            if HEADED:
+                args += ["--window-position=0,0", f"--window-size={SCREEN['width']},{SCREEN['height']}",
+                         "--no-first-run", "--no-default-browser-check", "--disable-infobars"]
+            self.browser = await pw.chromium.launch(headless=not HEADED, args=args)
         return self.browser
+
+    async def launch_background(self):
+        pw = await self._playwright()
+        if not self.background or not self.background.is_connected():
+            self.background = await pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        return self.background
 
     async def ensure(self):
         if self.page and not self.page.is_closed():
             return self.page
         async with self.launch_lock:
             await self.launch()
-        ctx = await self.browser.new_context(viewport={"width": 1280, "height": 800}, locale="en-US")
+        # headed: the page fills the window, so what the user sees over VNC is what the agent sees
+        ctx = await (self.browser.new_context(no_viewport=True, locale="en-US") if HEADED
+                     else self.browser.new_context(viewport={"width": 1280, "height": 800}, locale="en-US"))
         self.page = await ctx.new_page()
         self.page.on("console", lambda m: self.console.append(f"[{m.type}] {m.text}"[:500]))
         return self.page
@@ -488,7 +510,7 @@ class ExtractReq(BaseModel):
 @app.post("/web/extract")
 async def web_extract(req: ExtractReq):
     async with browser.launch_lock:
-        b = await browser.launch()
+        b = await browser.launch_background()
     ctx = await b.new_context(viewport={"width": 1280, "height": 800}, locale="en-US")
     try:
         page = await ctx.new_page()
@@ -528,9 +550,66 @@ async def proxy(port: int, path: str, request: Request):
                     headers={k: v for k, v in r.headers.items() if k.lower() not in drop})
 
 
+# ------------------------------------------------------------------ vnc ---
+# WebSocket <-> TCP bridge to x11vnc (localhost:5900), so the live screen goes through the
+# same single port as the action API. The orchestrator relays it to the web client (noVNC).
+
+VNC_PORT = 5900
+
+
+async def vnc_available() -> bool:
+    try:
+        _, w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", VNC_PORT), 1)
+        w.close()
+        return True
+    except (OSError, asyncio.TimeoutError):
+        return False
+
+
+@app.websocket("/vnc")
+async def vnc(ws: WebSocket):
+    proto = "binary" if "binary" in ws.scope.get("subprotocols", []) else None
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", VNC_PORT)
+    except OSError:
+        await ws.close(code=1011)
+        return
+    await ws.accept(subprotocol=proto)
+
+    async def up():
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg["type"] == "websocket.disconnect":
+                    break
+                data = msg.get("bytes") or (msg.get("text") or "").encode()
+                writer.write(data)
+                await writer.drain()
+        except (WebSocketDisconnect, ConnectionError):
+            pass
+
+    async def down():
+        try:
+            while chunk := await reader.read(65536):
+                await ws.send_bytes(chunk)
+        except (WebSocketDisconnect, ConnectionError, RuntimeError):
+            pass
+
+    tasks = [asyncio.create_task(up()), asyncio.create_task(down())]
+    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for t in tasks:
+        t.cancel()
+    writer.close()
+    try:
+        await ws.close()
+    except RuntimeError:
+        pass
+
+
 @app.get("/health")
 async def health():
-    return {"ok": True, "workspace": str(WORKSPACE), "time": time.time()}
+    return {"ok": True, "workspace": str(WORKSPACE), "time": time.time(), "vnc": await vnc_available(),
+            "screen": SCREEN if HEADED else None}
 
 
 if __name__ == "__main__":

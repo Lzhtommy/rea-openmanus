@@ -62,7 +62,10 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const md = (s) => {
   // single "~" is a range ("261~1168 亿"), not strikethrough; drop YAML front matter of skill/report files
-  const src = String(s ?? "").replace(/^---\n[\s\S]*?\n---\n/, "").replace(/(^|[^~])~(?!~)/g, "$1\\~");
+  const src = String(s ?? "").replace(/^---\n[\s\S]*?\n---\n/, "").split(/(```[\s\S]*?```|`[^`\n]*`)/).map((part, i) => i % 2 ? part
+    : part.replace(/(^|[^~])~(?!~)/g, "$1\\~")
+      // bare URLs end at CJK punctuation / markdown emphasis (GFM autolinks would swallow "，**标题**")
+      .replace(/(^|[^<(\[\w/])(https?:\/\/[^\s<>()\[\]，。；：、！？（）【】「」“”‘’*]+)/g, "$1<$2>")).join("");
   const html = window.marked ? marked.parse(src, { breaks: true }) : `<p>${esc(s).replace(/\n/g, "<br>")}</p>`;
   return window.DOMPurify ? DOMPurify.sanitize(html, { ADD_ATTR: ["target"] }) : esc(s);
 };
@@ -96,13 +99,15 @@ const S = {
   sessions: [], cfg: {}, current: null, ws: null, lastSeq: {}, replaying: false, filter: "",
   title: "", status: "idle", live: "", plan: [], planOpen: false,
   turns: [], steps: [], stepIdx: {}, dirty: new Set(),
-  panel: { open: false, userClosed: false, sel: null, file: null, full: false },
+  panel: { open: false, userClosed: false, sel: null, file: null, full: false, takeover: false },
+  vnc: false, vncFailed: false,
   attachments: [], previews: {},
 };
 
 function resetSession() {
-  Object.assign(S, { title: "", status: "idle", live: "", plan: [], planOpen: false, turns: [], steps: [], stepIdx: {}, dirty: new Set() });
-  S.panel = { open: false, userClosed: false, sel: null, file: null, full: false };
+  Object.assign(S, { title: "", status: "idle", live: "", plan: [], planOpen: false, turns: [], steps: [], stepIdx: {}, dirty: new Set(), vnc: false, vncFailed: false });
+  S.panel = { open: false, userClosed: false, sel: null, file: null, full: false, takeover: false };
+  vncDisconnect();
   $("#thread").innerHTML = "";
 }
 
@@ -187,7 +192,8 @@ function apply(ev) {
     case "liveStatus": S.live = ev.text || ""; if (lastTurn()) S.dirty.add(lastTurn()); break;
     case "planUpdate": S.plan = ev.tasks || []; break;
     case "title": S.title = ev.title; refreshSessions(); break;
-    default: return; // explanation, sandboxUpdate: not shown (Manus doesn't render them)
+    case "sandboxUpdate": S.vnc = !!ev.vnc; S.vncFailed = false; break;
+    default: return; // explanation: not shown (Manus doesn't render it)
   }
   scheduleRender();
 }
@@ -288,7 +294,9 @@ function itemHtml(t, it, isCurrent) {
 
 function chatHtml(ev, isFinal) {
   const cls = ev.messageType === "ask" ? "narr ask" : "narr";
-  return `<div class="${isFinal ? "final-msg" : cls}"><div class="prose">${md(ev.content)}</div>${cardsHtml(ev.attachments)}</div>`;
+  const takeover = ev.messageType === "ask" && ev.takeover === "browser" && S.vnc && S.status === "waiting"
+    ? `<div class="ask-takeover"><button class="takeover-btn ${S.panel.takeover ? "on" : ""}" data-act="takeover">${icon("hand")}${S.panel.takeover ? "结束接管并继续" : "接管浏览器"}</button></div>` : "";
+  return `<div class="${isFinal ? "final-msg" : cls}"><div class="prose">${md(ev.content)}</div>${cardsHtml(ev.attachments)}${takeover}</div>`;
 }
 
 function stepText(s) {
@@ -435,12 +443,25 @@ function renderPanel() {
   document.body.classList.toggle("pc-open", open);
   document.body.classList.toggle("pc-full", open && S.panel.full);
   $("#panel-btn").classList.toggle("hidden", !S.current || !S.steps.length || open);
-  if (!open) return;
+  if (!open) { vncDisconnect(); return; }
   $("#pc-full").innerHTML = icon(S.panel.full ? "minimize" : "maximize");
 
   const view = $("#pc-view"), status = $("#pc-status");
   const running = S.status === "running";
-  if (S.panel.file) {
+  const lastStep = S.steps[S.steps.length - 1];
+  const live = S.panel.sel === null && !S.panel.file;
+  const showVnc = S.vnc && !S.vncFailed && live && (S.panel.takeover || lastStep?.tool === "browser");
+  const takeBtn = S.vnc && !S.vncFailed && live
+    ? `<button class="takeover-btn ${S.panel.takeover ? "on" : ""}" data-act="takeover">${icon("hand")}${S.panel.takeover ? "结束接管" : "接管"}</button>` : "";
+  $("#pc-vnc").classList.toggle("hidden", !showVnc);
+  $("#pc-vnc").classList.toggle("control", S.panel.takeover);
+  view.classList.toggle("hidden", showVnc);
+  if (showVnc) vncConnect(); else vncDisconnect();
+  if (showVnc && S.panel.takeover) {
+    status.innerHTML = `<span class="grow"><span class="who">你正在控制 OpenManus 的电脑</span><span class="div"></span><span class="what">完成后点击「结束接管」把控制权交还给 OpenManus</span></span>${takeBtn}`;
+  } else if (showVnc) {
+    status.innerHTML = `<span class="grow"><span class="who">OpenManus ${running ? "正在使用" : "使用了"}浏览器</span><span class="div"></span><span class="what">${esc(lastStep?.detail?.browser?.url || lastStep?.message?.param || "")}</span></span><span class="live-badge"><i></i>实时画面</span>${takeBtn}`;
+  } else if (S.panel.file) {
     const f = S.panel.file;
     status.innerHTML = `<span class="who">OpenManus 正在查看文件</span><span class="div"></span><span class="what">${esc(f.path || f.name)}</span>`;
     view.innerHTML = `<div class="file-head">${icon("fileText")}<span class="grow">${esc(f.name)}</span><a class="icon-btn sm" href="${esc(f.url)}" download="${esc(f.name)}" title="下载">${icon("download")}</a><a class="icon-btn sm" href="${esc(f.url)}" target="_blank" title="新窗口打开">${icon("external")}</a></div><div id="file-body"></div>`;
@@ -454,7 +475,7 @@ function renderPanel() {
       const use = TOOL[s.tool]?.use || "工具";
       const what = s.tool === "browser" || s.tool === "webpage_extract" ? (s.detail?.browser?.url || s.detail?.webpageExtract?.url || s.message?.param) : `${zh(s.message?.action)} ${s.message?.param || ""}`;
       const verb = s.status === "start" || s.status === "running" ? "正在使用" : "使用了";
-      status.innerHTML = `<span class="who">OpenManus ${verb}${esc(use)}</span><span class="div"></span><span class="what">${esc(what)}</span>`;
+      status.innerHTML = `<span class="grow"><span class="who">OpenManus ${verb}${esc(use)}</span><span class="div"></span><span class="what">${esc(what)}</span></span>${takeBtn}`;
       view.innerHTML = stepView(s);
       const term = view.querySelector(".term"); if (term && S.panel.sel === null) view.scrollTop = view.scrollHeight;
     }
@@ -462,7 +483,7 @@ function renderPanel() {
   // timeline
   const n = S.steps.length, idx = S.panel.sel === null ? n - 1 : S.stepIdx[S.panel.sel];
   const r = $("#pc-range");
-  r.max = Math.max(0, n - 1); r.value = Math.max(0, idx); r.disabled = n < 2;
+  r.max = Math.max(1, n - 1); r.value = n > 1 ? Math.max(0, idx) : 1; r.disabled = n < 2;
   r.style.setProperty("--p", n > 1 ? `${(idx / (n - 1)) * 100}%` : "100%");
   const isLive = S.panel.sel === null && !S.panel.file;
   $("#live-tag").classList.toggle("on", isLive && running);
@@ -524,6 +545,41 @@ async function renderFileBody(f) {
   const text = await fetchText(f.url);
   if (S.panel.file !== f) return;
   body.innerHTML = e === "md" || e === "markdown" ? `<div class="page-md"><div class="prose">${md(text)}</div></div>` : editorHtml({ path: f.path, content: text, op: "read" }).replace(/^<div class="file-head">.*?<\/div>/, "");
+}
+
+// ------------------------------------------------------------------ live screen (noVNC) ---
+// The sandbox runs its browser on a virtual display exported over VNC; the backend relays it at
+// /api/sessions/<id>/vnc. View-only by default, interactive while the user has taken over.
+const NOVNC = "https://cdn.jsdelivr.net/gh/novnc/noVNC@v1.5.0/core/rfb.js";
+let rfb = null, rfbSid = null, RFB = null;
+async function vncConnect() {
+  const sid = S.current;
+  if (rfb && rfbSid === sid) { rfb.viewOnly = !S.panel.takeover; return; }
+  vncDisconnect();
+  rfbSid = sid;
+  try { RFB = RFB || (await import(NOVNC)).default; } catch { S.vncFailed = true; scheduleRender(); return; }
+  if (rfbSid !== sid || rfb) return;
+  const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/sessions/${sid}/vnc`;
+  const r = new RFB($("#pc-vnc"), url, { wsProtocols: ["binary"] });
+  r.scaleViewport = true; r.resizeSession = false; r.viewOnly = !S.panel.takeover; r.background = "transparent";
+  r.addEventListener("disconnect", () => {
+    if (rfb !== r) return;
+    rfb = null; rfbSid = null;
+    if (S.current === sid) { S.vncFailed = true; S.panel.takeover = false; scheduleRender(); } // fall back to screenshots
+  });
+  rfb = r;
+}
+function vncDisconnect() {
+  if (!rfb) return;
+  const r = rfb; rfb = null; rfbSid = null;
+  try { r.disconnect(); } catch { /* already closed */ }
+}
+function toggleTakeover() {
+  const ending = S.panel.takeover;
+  S.panel.takeover = !ending;
+  if (!ending) { S.panel.open = true; S.panel.userClosed = false; S.panel.sel = null; S.panel.file = null; }
+  else if (S.status === "waiting") send({ type: "user_message", sessionId: S.current, content: "我已完成浏览器中的操作，请继续。", attachments: [] });
+  refreshSel();
 }
 
 // ------------------------------------------------------------------ sessions / nav ---
@@ -613,7 +669,7 @@ function bind() {
   $("#share-btn").onclick = async () => { try { await navigator.clipboard.writeText(location.href); $("#share-btn").title = "已复制链接"; } catch { prompt("复制链接", location.href); } };
   $("#delete-btn").onclick = () => S.current && deleteSession(S.current);
   $("#panel-btn").onclick = () => { S.panel.open = true; S.panel.userClosed = false; scheduleRender(); };
-  const closePanel = () => { S.panel.open = false; S.panel.userClosed = true; S.panel.full = false; scheduleRender(); };
+  const closePanel = () => { S.panel.open = false; S.panel.userClosed = true; S.panel.full = false; S.panel.takeover = false; scheduleRender(); };
   $("#pc-close").onclick = closePanel; $("#pc-close-tab").onclick = closePanel;
   $("#pc-full").onclick = () => { S.panel.full = !S.panel.full; scheduleRender(); };
   $("#pc-prev").onclick = () => stepNav(-1);
@@ -642,6 +698,7 @@ function bind() {
       case "copy": { const fi = finalIndex(t); if (fi >= 0) navigator.clipboard?.writeText(t.items.slice(fi).filter((x) => x.kind === "chat").map((x) => x.ev.content).join("\n\n")); break; }
       case "open-file": if (e.target.closest("a[download]")) return; S.panel.open = true; S.panel.userClosed = false; S.panel.file = { url: a.dataset.url, name: a.dataset.name, path: a.dataset.path }; refreshSel(); break;
       case "plan": e.stopPropagation(); S.planOpen = !S.planOpen; renderTaskbar(); return;
+      case "takeover": toggleTakeover(); break;
     }
   });
   $("#taskbar").addEventListener("click", (e) => { if (!e.target.closest("[data-act]") && !e.target.closest(".plan-pop")) { S.panel.open = true; S.panel.userClosed = false; S.panel.sel = null; S.panel.file = null; scheduleRender(); } });

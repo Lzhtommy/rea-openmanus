@@ -19,6 +19,8 @@ from urllib.parse import quote
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from websockets.asyncio.client import connect as ws_connect
+from websockets.exceptions import WebSocketException
 
 from . import config, session as session_mod
 from .sandbox import manager
@@ -152,6 +154,45 @@ async def ws(websocket: WebSocket):
         send_task.cancel()
         for s in joined.values():
             s.subscribers.discard(queue)
+
+
+@app.websocket("/api/sessions/{sid}/vnc")
+async def vnc(websocket: WebSocket, sid: str):
+    """Relay the sandbox's live screen (VNC over WebSocket) to the web client, like Manus' vncUrl."""
+    s = session_mod.store.get(sid)
+    sb = manager.sandboxes.get(sid) if s else None
+    if not sb or not sb.vnc:
+        await websocket.close(code=1008)
+        return
+    wanted = websocket.scope.get("subprotocols", [])
+    try:
+        upstream = await ws_connect(f"{sb.ws_url}/vnc", subprotocols=["binary"] if "binary" in wanted else None,
+                                    max_size=None, open_timeout=10)
+    except (OSError, WebSocketException):
+        await websocket.close(code=1011)
+        return
+    await websocket.accept(subprotocol="binary" if "binary" in wanted else None)
+
+    async def up():
+        while True:
+            msg = await websocket.receive()
+            if msg["type"] == "websocket.disconnect":
+                return
+            await upstream.send(msg.get("bytes") or (msg.get("text") or "").encode())
+
+    async def down():
+        async for data in upstream:
+            await websocket.send_bytes(data if isinstance(data, bytes) else data.encode())
+
+    tasks = [asyncio.create_task(up()), asyncio.create_task(down())]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in tasks:
+            t.cancel()
+        await upstream.close()
+        with contextlib.suppress(RuntimeError):
+            await websocket.close()
 
 
 @app.get("/api/config")

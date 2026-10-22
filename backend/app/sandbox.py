@@ -28,7 +28,16 @@ class Sandbox:
         self.base_url = base_url
         self.workdir = workdir
         self.mode = mode
+        self.info: dict = {}  # /health payload: vnc availability, screen size
         self.http = httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(660, connect=10))
+
+    @property
+    def vnc(self) -> bool:
+        return bool(self.info.get("vnc"))
+
+    @property
+    def ws_url(self) -> str:
+        return self.base_url.replace("http://", "ws://", 1)
 
     async def call(self, path: str, payload: dict | None = None) -> dict:
         try:
@@ -49,6 +58,7 @@ class Sandbox:
             try:
                 r = await self.http.get("/health", timeout=3)
                 if r.status_code == 200:
+                    self.info = r.json()
                     return
             except httpx.HTTPError:
                 pass

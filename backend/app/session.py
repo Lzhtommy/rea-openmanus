@@ -148,7 +148,7 @@ class Session(AgentHost):
             await self.emit({"type": "statusUpdate", "agentStatus": "running"})
             sandbox = await manager.get(self.session_id)
             await self.emit({"type": "sandboxUpdate", "sandboxId": self.session_id, "status": "running",
-                             "mode": sandbox.mode})
+                             "mode": sandbox.mode, "vnc": sandbox.vnc, "screen": sandbox.info.get("screen")})
             await skills.install(sandbox)
             agent = Agent(self, sandbox, self.messages)
             agent.repair_history()
