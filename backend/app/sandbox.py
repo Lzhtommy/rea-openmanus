@@ -1,0 +1,154 @@
+"""Sandbox lifecycle (one sandbox per session) and the HTTP client the agent uses to act."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import socket
+import sys
+from pathlib import Path
+
+import httpx
+
+from . import config
+
+log = logging.getLogger("manus.sandbox")
+
+
+class SandboxError(Exception):
+    pass
+
+
+class Sandbox:
+    """Client for one running sandbox server."""
+
+    def __init__(self, session_id: str, base_url: str, workdir: str, mode: str):
+        self.session_id = session_id
+        self.base_url = base_url
+        self.workdir = workdir
+        self.mode = mode
+        self.http = httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(660, connect=10))
+
+    async def call(self, path: str, payload: dict | None = None) -> dict:
+        try:
+            r = await self.http.post(path, json=payload or {})
+        except httpx.HTTPError as e:
+            raise SandboxError(f"sandbox unreachable: {e}") from e
+        if r.status_code >= 400:
+            try:
+                detail = r.json().get("detail", r.text)
+            except ValueError:
+                detail = r.text
+            raise SandboxError(str(detail))
+        return r.json()
+
+    async def wait_ready(self, timeout: float = 60) -> None:
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            try:
+                r = await self.http.get("/health", timeout=3)
+                if r.status_code == 200:
+                    return
+            except httpx.HTTPError:
+                pass
+            if asyncio.get_event_loop().time() > deadline:
+                raise SandboxError("sandbox did not become ready")
+            await asyncio.sleep(0.5)
+
+    async def close(self):
+        await self.http.aclose()
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+async def _run(*cmd: str) -> str:
+    p = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    out, err = await p.communicate()
+    if p.returncode != 0:
+        raise SandboxError(f"{' '.join(cmd[:3])}... failed: {err.decode().strip()}")
+    return out.decode().strip()
+
+
+class SandboxManager:
+    def __init__(self):
+        self.sandboxes: dict[str, Sandbox] = {}
+        self.local_procs: dict[str, asyncio.subprocess.Process] = {}
+        self.locks: dict[str, asyncio.Lock] = {}
+
+    async def get(self, session_id: str) -> Sandbox:
+        lock = self.locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            sb = self.sandboxes.get(session_id)
+            if sb:
+                return sb
+            sb = await (self._start_docker(session_id) if config.SANDBOX_MODE == "docker"
+                        else self._start_local(session_id))
+            self.sandboxes[session_id] = sb
+            return sb
+
+    async def _start_docker(self, sid: str) -> Sandbox:
+        name = f"manus-sbx-{sid}"
+        existing = await _run("docker", "ps", "-a", "--filter", f"name=^{name}$", "--format", "{{.State}}")
+        if existing:
+            if existing != "running":
+                await _run("docker", "start", name)
+        else:
+            await _run("docker", "run", "-d", "--name", name,
+                       "--label", "manus.sandbox=1",
+                       "-p", "127.0.0.1::8080",
+                       "--memory", os.environ.get("MANUS_SANDBOX_MEMORY", "4g"),
+                       "--cpus", os.environ.get("MANUS_SANDBOX_CPUS", "2"),
+                       "--shm-size", "1g",
+                       config.SANDBOX_IMAGE)
+        port_line = await _run("docker", "port", name, "8080/tcp")
+        port = port_line.splitlines()[0].rsplit(":", 1)[1]
+        sb = Sandbox(sid, f"http://127.0.0.1:{port}", "/home/ubuntu", "docker")
+        await sb.wait_ready()
+        log.info("docker sandbox %s ready on %s", name, port)
+        return sb
+
+    async def _start_local(self, sid: str) -> Sandbox:
+        ws = (config.WORKSPACES_DIR / sid).resolve()
+        ws.mkdir(parents=True, exist_ok=True)
+        port = _free_port()
+        env = {**os.environ, "SANDBOX_WORKSPACE": str(ws), "SANDBOX_PORT": str(port), "SANDBOX_HOST": "127.0.0.1"}
+        sandbox_python = config.SANDBOX_DIR / ".venv" / "bin" / "python"
+        python = str(sandbox_python) if sandbox_python.exists() else sys.executable
+        proc = await asyncio.create_subprocess_exec(
+            python, str(config.SANDBOX_DIR / "server.py"), cwd=str(ws), env=env,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        self.local_procs[sid] = proc
+        sb = Sandbox(sid, f"http://127.0.0.1:{port}", str(ws), "local")
+        await sb.wait_ready()
+        log.warning("LOCAL sandbox for %s at %s — commands run on the host, dev use only", sid, ws)
+        return sb
+
+    async def destroy(self, sid: str) -> None:
+        sb = self.sandboxes.pop(sid, None)
+        if sb:
+            await sb.close()
+        if config.SANDBOX_MODE == "docker":
+            try:
+                await _run("docker", "rm", "-f", f"manus-sbx-{sid}")
+            except SandboxError:
+                pass
+        proc = self.local_procs.pop(sid, None)
+        if proc and proc.returncode is None:
+            proc.terminate()
+
+    async def shutdown(self) -> None:
+        for sid in list(self.local_procs):
+            proc = self.local_procs.pop(sid)
+            if proc.returncode is None:
+                proc.terminate()
+        for sb in self.sandboxes.values():
+            await sb.close()
+        self.sandboxes.clear()
+
+
+manager = SandboxManager()

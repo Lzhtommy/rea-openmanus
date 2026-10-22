@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenManus</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- ============================================================ sidebar -->
+    <aside id="nav">
+      <div class="nav-head">
+        <a class="brand" href="#" id="brand"><span class="brand-mark" data-icon="logo"></span><span class="brand-word">openmanus</span></a>
+        <div class="nav-head-actions">
+          <button class="icon-btn" id="search-btn" title="搜索任务" data-icon="search"></button>
+          <button class="icon-btn" id="nav-collapse" title="收起侧边栏" data-icon="panelLeft"></button>
+        </div>
+      </div>
+      <div class="nav-body">
+        <button class="nav-item" id="new-task"><span class="nav-ico" data-icon="newTask"></span><span class="nav-label">新建任务</span><kbd>⌘K</kbd></button>
+        <div class="nav-search hidden" id="nav-search"><span data-icon="search"></span><input id="search-input" placeholder="搜索任务" /></div>
+        <div class="nav-section">任务</div>
+        <div id="session-list"></div>
+      </div>
+      <div class="nav-foot">
+        <div class="me"><span class="avatar">O</span><div class="me-text"><div class="me-name">OpenManus</div><div class="me-sub" id="config-info"></div></div></div>
+        <button class="icon-btn" id="theme-btn" title="切换主题" data-icon="sun"></button>
+      </div>
+    </aside>
+
+    <!-- ============================================================ main -->
+    <main id="main">
+      <header id="main-head">
+        <div class="head-left">
+          <button class="icon-btn only-collapsed" id="nav-expand" title="展开侧边栏" data-icon="panelLeft"></button>
+          <button class="icon-btn only-collapsed" id="new-task-2" title="新建任务" data-icon="newTask"></button>
+          <div id="session-title" class="session-title">OpenManus</div>
+        </div>
+        <div class="head-right">
+          <button class="icon-btn hidden" id="share-btn" title="复制链接" data-icon="share"></button>
+          <button class="icon-btn hidden" id="delete-btn" title="删除任务" data-icon="trash"></button>
+          <button class="icon-btn hidden" id="panel-btn" title="OpenManus 的电脑" data-icon="panelRight"></button>
+        </div>
+      </header>
+
+      <div id="home" class="hidden">
+        <div class="home-inner">
+          <h1 class="greeting">你好<br /><span>我能为你做什么？</span></h1>
+          <div id="home-slot"></div>
+          <div class="examples">
+            <button class="example" data-example="调研 2026 年主流开源大模型推理框架（vLLM、SGLang、TensorRT-LLM 等），对比性能与特性，输出一份 Markdown 报告"><span data-icon="search"></span>调研推理框架</button>
+            <button class="example" data-example="用 HTML/JS 写一个可以在浏览器里玩的贪吃蛇小游戏，部署出预览链接"><span data-icon="globe"></span>做一个网页小游戏</button>
+            <button class="example" data-example="打开 https://news.ycombinator.com ，总结当前首页前 10 条新闻并给出每条的链接"><span data-icon="compass"></span>总结 Hacker News</button>
+            <button class="example" data-example="用 Python 生成一份 2015-2025 年中国 GDP 增速的折线图，并写一段简要分析"><span data-icon="chart"></span>数据分析与图表</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="scroller" class="hidden">
+        <div id="thread"></div>
+      </div>
+
+      <div id="dock" class="hidden">
+        <div id="dock-inner">
+          <div id="taskbar" class="hidden"></div>
+          <div id="dock-slot"></div>
+          <div class="disclaimer">OpenManus 是 AI 智能体，可能会出错，请核实重要信息。</div>
+        </div>
+      </div>
+
+      <form id="composer" autocomplete="off">
+        <div id="attach-list"></div>
+        <textarea id="input" rows="1" placeholder="分配一个任务或提问任何问题"></textarea>
+        <div class="composer-bar">
+          <label class="round-btn" title="添加文件"><span data-icon="plus"></span><input id="file-input" type="file" multiple hidden /></label>
+          <span class="spacer"></span>
+          <button type="submit" class="send-btn" id="send-btn" title="发送" disabled data-icon="arrowUp"></button>
+        </div>
+      </form>
+    </main>
+
+    <!-- ============================================================ computer -->
+    <section id="computer" class="hidden">
+      <header class="pc-head">
+        <div class="pc-tab"><span data-icon="monitor"></span><span>OpenManus 的电脑</span><button class="pc-tab-x" id="pc-close-tab" data-icon="x" title="关闭"></button></div>
+        <div class="pc-head-actions">
+          <button class="icon-btn" id="pc-full" title="全屏" data-icon="maximize"></button>
+          <button class="icon-btn" id="pc-close" title="收起" data-icon="panelRight"></button>
+        </div>
+      </header>
+      <div class="pc-status" id="pc-status"></div>
+      <div class="pc-body"><div id="pc-view"></div><button class="jump-live hidden" id="jump-live"><span data-icon="play"></span>跳到实时</button></div>
+      <div class="pc-timeline">
+        <button class="icon-btn sm" id="pc-prev" title="上一步" data-icon="skipBack"></button>
+        <button class="icon-btn sm" id="pc-next" title="下一步" data-icon="skipForward"></button>
+        <input type="range" id="pc-range" min="0" max="0" value="0" />
+        <span class="live-tag" id="live-tag"><i></i>实时</span>
+      </div>
+      <div class="pc-foot" id="pc-foot"></div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

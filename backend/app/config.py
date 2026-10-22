@@ -1,0 +1,47 @@
+import os
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _bool(name: str, default: bool) -> bool:
+    return os.environ.get(name, str(default)).lower() in {"1", "true", "yes", "on"}
+
+
+# OpenAI-compatible chat-completions gateway (LiteLLM proxy). MODEL is the gateway's model name.
+LLM_BASE_URL = os.environ.get("MANUS_LLM_BASE_URL", "")
+LLM_API_KEY = os.environ.get("MANUS_LLM_API_KEY") or os.environ.get("LITELLM_API_KEY", "")
+MODEL = os.environ.get("MANUS_MODEL", "claude-opus-5-5")
+EFFORT = os.environ.get("MANUS_EFFORT", "high")
+SUBAGENT_EFFORT = os.environ.get("MANUS_SUBAGENT_EFFORT", "medium")
+MAX_TOKENS = int(os.environ.get("MANUS_MAX_TOKENS", "64000"))
+MAX_ITERATIONS = int(os.environ.get("MANUS_MAX_ITERATIONS", "200"))
+# Send reasoning_effort (LiteLLM maps it to Claude adaptive thinking; dropped for models without it).
+REASONING = _bool("MANUS_REASONING", True)
+# cache_control breakpoints on the system prompt and conversation tail (Anthropic prompt caching).
+PROMPT_CACHE = _bool("MANUS_PROMPT_CACHE", True)
+
+# "docker" (per-session container, production) or "local" (dev only: runs on host!)
+SANDBOX_MODE = os.environ.get("MANUS_SANDBOX", "docker")
+SANDBOX_IMAGE = os.environ.get("MANUS_SANDBOX_IMAGE", "manus-sandbox:latest")
+SANDBOX_DIR = ROOT / "sandbox"
+
+DATA_DIR = Path(os.environ.get("MANUS_DATA_DIR", ROOT / "data"))
+SESSIONS_DIR = DATA_DIR / "sessions"
+WORKSPACES_DIR = DATA_DIR / "workspaces"  # local sandbox mode only
+SKILLS_DIR = ROOT / "backend" / "skills"
+STATIC_DIR = ROOT / "frontend"
+
+PLANNER_ENABLED = _bool("MANUS_PLANNER", True)
+# After a task finishes, suggest follow-up requests (Manus' `suggestion` step).
+SUGGESTIONS_ENABLED = _bool("MANUS_SUGGESTIONS", True)
+# Send browser screenshots to the model as images (better grounding, more tokens).
+BROWSER_VISION = _bool("MANUS_BROWSER_VISION", True)
+# Observations longer than this are written to a sandbox file and replaced by a
+# head/tail excerpt plus the path (Manus' "restorable compression").
+OBSERVATION_LIMIT = int(os.environ.get("MANUS_OBSERVATION_LIMIT", "12000"))
+WIDE_RESEARCH_CONCURRENCY = int(os.environ.get("MANUS_WIDE_CONCURRENCY", "4"))
+WIDE_RESEARCH_MAX_TASKS = int(os.environ.get("MANUS_WIDE_MAX_TASKS", "20"))
+
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
+PUBLIC_BASE_URL = os.environ.get("MANUS_PUBLIC_URL", "http://localhost:8000")
