@@ -114,6 +114,7 @@ class SandboxManager:
                        "--memory", os.environ.get("MANUS_SANDBOX_MEMORY", "4g"),
                        "--cpus", os.environ.get("MANUS_SANDBOX_CPUS", "2"),
                        "--shm-size", "1g",
+                       "-e", f"TZ={config.SANDBOX_TZ}",
                        config.SANDBOX_IMAGE)
         port_line = await _run("docker", "port", name, "8080/tcp")
         port = port_line.splitlines()[0].rsplit(":", 1)[1]

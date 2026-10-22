@@ -326,6 +326,39 @@ async def test_streaming_deltas(store, monkeypatch):
     assert not any(e["type"] == "chatDelta" for e in s.events)  # ephemeral, never persisted
 
 
+@pytest.mark.asyncio
+async def test_schedule_tool_and_tick(store, monkeypatch):
+    """The agent can create a schedule from chat; a due schedule starts a new tagged session."""
+    from app import scheduler as scheduler_mod
+    scheduler_mod.scheduler = scheduler_mod.Scheduler(store)
+    model = ScriptedModel([
+        msg(tool("schedule_create", title="每日新闻", prompt="总结今天的科技新闻", kind="daily", time="08:00")),
+        msg(tool("schedule_create", title="bad", prompt="x", kind="daily", time="8点")),
+        msg(tool("idle")),
+        msg(tool("message_notify_user", text="scheduled run done")),
+        msg(tool("idle")),
+    ])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("每天早上 8 点帮我总结科技新闻", [])
+    await wait_status(s, {"idle"})
+    items = scheduler_mod.scheduler.list()
+    assert len(items) == 1 and items[0]["description"] == "每天 08:00" and items[0]["nextRunAt"]
+    results = [b for m in s.messages if m["role"] == "user" and isinstance(m["content"], list)
+               for b in m["content"] if b.get("type") == "tool_result"]
+    assert "created" in results[0]["content"] and results[1].get("is_error")
+
+    sched = items[0]
+    started = await scheduler_mod.scheduler.tick(now=sched["nextRunAt"] + 1)
+    assert len(started) == 1
+    run = store.get(started[0])
+    assert run.schedule_id == sched["id"] and run.meta()["scheduleId"] == sched["id"]
+    await wait_status(run, {"idle"})
+    assert run.events[0]["content"] == "总结今天的科技新闻"
+    after = scheduler_mod.scheduler.items[sched["id"]]
+    assert after["runs"] == [run.session_id] and after["nextRunAt"] > sched["nextRunAt"]
+
+
 def teardown_module():
     for proc in manager.local_procs.values():
         if proc.returncode is None:

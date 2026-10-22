@@ -404,6 +404,36 @@ body.pc-full #main { display: none; }
 .viewer-body { flex: 1; min-height: 0; overflow: auto; }
 .viewer-body .preview-frame { height: 100% !important; }
 
+/* ------------------------------------------------------------------ automations */
+#automations { flex: 1; min-height: 0; overflow-y: auto; }
+.auto-intro { margin: 0 0 16px; font-size: 14px; color: var(--text-tertiary); }
+.auto-card { border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-white); padding: 14px 16px; margin-bottom: 12px; }
+.auto-card.off { opacity: .6; }
+.auto-top { display: flex; align-items: center; gap: 12px; }
+.auto-ico { width: 36px; height: 36px; border-radius: 10px; background: var(--fill-blue); color: var(--text-blue); display: flex; align-items: center; justify-content: center; flex: none; }
+.auto-main { flex: 1; min-width: 0; }
+.auto-title { font-size: 15px; font-weight: 500; }
+.auto-when { font-size: 13px; color: var(--text-tertiary); margin-top: 1px; }
+.auto-prompt { margin-top: 10px; font-size: 14px; line-height: 21px; color: var(--text-secondary); background: var(--fill-light); border-radius: 8px; padding: 8px 12px; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.auto-foot { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.auto-runs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-tertiary); overflow: hidden; white-space: nowrap; }
+.auto-runs a { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.auto-runs svg.i { width: 12px; height: 12px; }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+.btn.sm svg.i { width: 12px; height: 12px; }
+.switch { width: 36px; height: 20px; border-radius: 999px; background: var(--fill-dark); position: relative; flex: none; transition: background .15s; }
+.switch i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px var(--shadow-m); transition: left .15s; }
+.switch.on { background: var(--success); } .switch.on i { left: 18px; }
+#sched-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.sched-card { width: min(520px, 100%); background: var(--bg-white); border-radius: 16px; box-shadow: 0 24px 64px var(--shadow-l); overflow: hidden; }
+#sched-form-title { font-size: 16px; font-weight: 500; }
+.sched-body { padding: 16px 18px 6px; display: flex; flex-direction: column; gap: 12px; }
+.sched-body label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); flex: 1; }
+.sched-body input, .sched-body textarea, .sched-body select { font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-dark); background: var(--bg-white); color: var(--text-primary); outline: none; resize: vertical; }
+.sched-body input:focus, .sched-body textarea:focus, .sched-body select:focus { border-color: var(--border-input-active); }
+.sched-row { display: flex; gap: 12px; }
+.sched-err { color: var(--error); font-size: 13px; min-height: 18px; }
+
 /* ------------------------------------------------------------------ responsive */
 @media (max-width: 1100px) {
   body.pc-open #main { display: none; }

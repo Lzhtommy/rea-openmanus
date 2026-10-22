@@ -61,6 +61,7 @@ class AgentHost:
     def save_shot(self, b64: str) -> str: return ""
     def file_url(self, path: str) -> str: return path
     async def keep_file(self, path: str, kind: str) -> None: ...
+    def create_schedule(self, args: dict) -> dict: raise NotImplementedError
     def preview_url(self, port: int) -> str: return ""
     def persist(self) -> None: ...
 
@@ -382,6 +383,18 @@ class Agent:
                                f"from inside the sandbox: to check the page yourself, open http://localhost:{a['port']}/ "
                                f"in the browser. Use relative asset paths so it works under the preview path.",
                                {"deploy": {"port": a["port"], "url": url}})
+
+        # ---- automation
+        if name == "schedule_create":
+            from .scheduler import ScheduleError
+            try:
+                s = host.create_schedule(a)
+            except ScheduleError as e:
+                return ToolOutcome(f"Could not create the schedule: {e}", is_error=True, detail={"error": str(e)})
+            nxt = time.strftime("%Y-%m-%d %H:%M", time.localtime(s["nextRunAt"])) if s.get("nextRunAt") else "none"
+            return ToolOutcome(f"Scheduled task \"{s['title']}\" created ({s['description']}); next run: {nxt}. "
+                               "Each run starts a new task with the prompt. The user can manage it under 自动化.",
+                               {"schedule": s})
 
         # ---- wide research
         if name == "agent_map_reduce":

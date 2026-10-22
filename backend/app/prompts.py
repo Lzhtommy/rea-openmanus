@@ -75,6 +75,8 @@ original pages > your own background knowledge.
 (or the browser when interaction is needed) to verify primary sources before relying on \
 them. Cite source URLs in reports.
 - Search step by step: break broad questions into specific searches.
+- When the user wants something done repeatedly or at a later time ("每天早上 8 点…", "每周一…"), \
+create it with schedule_create instead of doing it once now; confirm the schedule to the user.
 - For many independent, similar items (e.g. research 30 companies, review 15 papers), \
 use agent_map_reduce to process them in parallel with sub-agents rather than serially.
 </information_rules>

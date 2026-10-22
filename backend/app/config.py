@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,20 @@ PROMPT_CACHE = _bool("MANUS_PROMPT_CACHE", True)
 SANDBOX_MODE = os.environ.get("MANUS_SANDBOX", "docker")
 SANDBOX_IMAGE = os.environ.get("MANUS_SANDBOX_IMAGE", "manus-sandbox:latest")
 SANDBOX_DIR = ROOT / "sandbox"
+
+
+def _utc_offset_minutes() -> int:
+    return -(time.altzone if time.localtime().tm_isdst > 0 else time.timezone) // 60
+
+
+UTC_OFFSET = _utc_offset_minutes()
+UTC_LABEL = f"UTC{'+' if UTC_OFFSET >= 0 else '-'}{abs(UTC_OFFSET) // 60:02d}:{abs(UTC_OFFSET) % 60:02d}"
+# Sandboxes run in the server's timezone so "8 点" means the same thing to the agent, its shell, and the
+# scheduler. POSIX form (sign inverted) works without tzdata in the image.
+_hm = f"{abs(UTC_OFFSET) // 60:02d}" + (f"{abs(UTC_OFFSET) % 60:02d}" if UTC_OFFSET % 60 else "")
+SANDBOX_TZ = os.environ.get("MANUS_SANDBOX_TZ") or \
+    f"<{'+' if UTC_OFFSET >= 0 else '-'}{_hm}>{'-' if UTC_OFFSET >= 0 else '+'}{abs(UTC_OFFSET) // 60}" + \
+    (f":{abs(UTC_OFFSET) % 60:02d}" if UTC_OFFSET % 60 else "")
 
 DATA_DIR = Path(os.environ.get("MANUS_DATA_DIR", ROOT / "data"))
 SESSIONS_DIR = DATA_DIR / "sessions"

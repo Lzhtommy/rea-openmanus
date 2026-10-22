@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, session as session_mod
+from . import config, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -33,7 +33,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     session_mod.store = session_mod.SessionStore()
+    scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
+    scheduler_mod.scheduler.start()
     yield
+    await scheduler_mod.scheduler.stop()
     for s in session_mod.store.sessions.values():
         if s.task and not s.task.done():
             s.task.cancel()
@@ -115,6 +118,50 @@ async def download(sid: str, path: str):
         raise HTTPException(r.status_code, "file not found")
     return Response(r.content, media_type=r.headers.get("content-type", "application/octet-stream"),
                     headers={"Content-Disposition": _disposition(name)})
+
+
+# ------------------------------------------------------------- schedules (自动化) ---
+
+def _sched(sid: str) -> dict:
+    s = scheduler_mod.scheduler.items.get(sid)
+    if not s:
+        raise HTTPException(404, "schedule not found")
+    return s
+
+
+@app.get("/api/schedules")
+async def list_schedules():
+    return scheduler_mod.scheduler.list()
+
+
+@app.post("/api/schedules")
+async def create_schedule(body: dict):
+    try:
+        return scheduler_mod.scheduler.create(body.get("title", ""), body.get("prompt", ""), body.get("schedule") or {})
+    except scheduler_mod.ScheduleError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/api/schedules/{sid}")
+async def update_schedule(sid: str, body: dict):
+    _sched(sid)
+    try:
+        return scheduler_mod.scheduler.update(sid, body)
+    except scheduler_mod.ScheduleError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/schedules/{sid}")
+async def delete_schedule(sid: str):
+    _sched(sid)
+    scheduler_mod.scheduler.delete(sid)
+    return {"ok": True}
+
+
+@app.post("/api/schedules/{sid}/run")
+async def run_schedule(sid: str):
+    _sched(sid)
+    return {"sessionId": await scheduler_mod.scheduler.run(sid)}
 
 
 @app.get("/api/library")

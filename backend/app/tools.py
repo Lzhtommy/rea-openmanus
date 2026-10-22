@@ -125,6 +125,16 @@ _TOOLS = [
         "output_file_pattern": {"type": "string",
                                 "description": "Optional per-item output path, may contain {index}"}},
        ["instruction", "items"]),
+    # ---- automation
+    _t("schedule_create",
+       "Create a scheduled task that runs `prompt` as a new task automatically (e.g. a daily news digest). "
+       "kind: once (needs `at`, ISO datetime in the user's local time), interval (needs every_minutes >= 5), "
+       "daily (needs `time` HH:MM), weekly (needs `weekday` 0=Monday..6=Sunday and `time`). Use when the user "
+       "asks for something to happen repeatedly or later.",
+       {"title": S, "prompt": {"type": "string", "description": "Full, self-contained instruction for each run"},
+        "kind": {"type": "string", "enum": ["once", "interval", "daily", "weekly"]},
+        "at": S, "every_minutes": I, "time": S, "weekday": I},
+       ["title", "prompt", "kind"]),
     # ---- control
     _t("idle",
        "Enter standby: the task is complete (or the user asked to stop). Sub-agents must "
@@ -140,7 +150,7 @@ REQUIRED = {t["name"]: t["input_schema"]["required"] for t in TOOLS}
 # Role-based masking by prefix (the tool list itself never changes).
 ROLE_DENY = {
     "main": (),
-    "subagent": ("message_", "agent_"),
+    "subagent": ("message_", "agent_", "schedule_"),
 }
 
 
@@ -196,6 +206,8 @@ def ui_category(name: str) -> str:
         return "map_reduce"
     if name.startswith("deploy_"):
         return "deploy"
+    if name.startswith("schedule_"):
+        return "schedule"
     return name
 
 
@@ -239,4 +251,6 @@ def describe(name: str, args: dict) -> tuple[str, str]:
         return "Running parallel sub-agents", f"{len(args.get('items', []))} items"
     if name == "deploy_expose_port":
         return "Exposing port", str(args.get("port", ""))
+    if name == "schedule_create":
+        return "Creating scheduled task", args.get("title", "")
     return ACTION_LABEL.get(cat, name), ""

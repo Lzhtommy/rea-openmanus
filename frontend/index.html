@@ -21,6 +21,7 @@
       </div>
       <div class="nav-body">
         <button class="nav-item" id="new-task"><span class="nav-ico" data-icon="newTask"></span><span class="nav-label">新建任务</span><kbd>⌘K</kbd></button>
+        <button class="nav-item" id="nav-auto"><span class="nav-ico" data-icon="clock"></span><span class="nav-label">自动化</span></button>
         <button class="nav-item" id="nav-library"><span class="nav-ico" data-icon="library"></span><span class="nav-label">资料库</span></button>
         <div class="nav-search hidden" id="nav-search"><span data-icon="search"></span><input id="search-input" placeholder="搜索任务" /></div>
         <div class="nav-section">任务</div>
@@ -68,6 +69,14 @@
         </div>
       </div>
 
+      <div id="automations" class="hidden">
+        <div class="lib-inner">
+          <div class="lib-head"><h2>自动化</h2><button class="btn primary" id="auto-new">新建定时任务</button></div>
+          <p class="auto-intro">让 OpenManus 按计划自动执行任务，每次运行都会创建一个新任务。也可以直接在对话里说「每天早上 8 点帮我……」。</p>
+          <div id="auto-list"></div>
+        </div>
+      </div>
+
       <div id="scroller" class="hidden">
         <div id="thread"></div>
       </div>
@@ -110,6 +119,22 @@
       </div>
       <div class="pc-foot" id="pc-foot"></div>
     </section>
+  </div>
+
+  <div id="sched-modal" class="hidden">
+    <form class="sched-card" id="sched-form" autocomplete="off">
+      <div class="viewer-head"><div class="viewer-title"><div id="sched-form-title">新建定时任务</div></div><button type="button" class="icon-btn" id="sched-close" data-icon="x"></button></div>
+      <div class="sched-body">
+        <label>名称<input name="title" placeholder="例如：每日科技新闻摘要" /></label>
+        <label>要执行的指令<textarea name="prompt" rows="4" placeholder="每次运行时发给 OpenManus 的完整指令" required></textarea></label>
+        <label>频率<select name="kind"><option value="daily">每天</option><option value="weekly">每周</option><option value="interval">按间隔</option><option value="once">仅一次</option></select></label>
+        <div class="sched-row" data-for="daily weekly"><label data-for="weekly">星期<select name="weekday"><option value="0">周一</option><option value="1">周二</option><option value="2">周三</option><option value="3">周四</option><option value="4">周五</option><option value="5">周六</option><option value="6">周日</option></select></label><label>时间<input type="time" name="time" value="09:00" /></label></div>
+        <label data-for="interval">间隔（分钟）<input type="number" name="everyMinutes" min="5" value="60" /></label>
+        <label data-for="once">时间<input type="datetime-local" name="at" /></label>
+        <div class="sched-err" id="sched-err"></div>
+      </div>
+      <div class="cc-actions"><button type="button" class="btn ghost" id="sched-cancel">取消</button><button type="submit" class="btn primary">保存</button></div>
+    </form>
   </div>
 
   <div id="viewer" class="hidden">

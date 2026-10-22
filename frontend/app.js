@@ -50,6 +50,8 @@ const ICONS = {
   image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
   code: '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>',
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  play2: '<path d="M6 4l14 8-14 8z"/>',
   library: '<path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"/>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   paperclip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 0 1 5.7 5.7l-8.6 8.6a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
@@ -88,17 +90,18 @@ const TOOL = {
   search: { icon: "search", use: "搜索" },
   map_reduce: { icon: "layers", use: "并行子任务" },
   deploy: { icon: "rocket", use: "部署服务" },
+  schedule: { icon: "clock", use: "自动化" },
 };
 const ACTION_ZH = {
   "Executing command": "执行命令", "Checking terminal": "查看终端", Browsing: "浏览", Typing: "输入", Clicking: "点击",
-  "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件",
+  "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务",
   Searching: "搜索", "Reading webpage": "提取网页", "Running parallel sub-agents": "并行执行子任务", "Exposing port": "部署预览",
 };
 const zh = (a) => ACTION_ZH[a] || a || "";
 
 // ------------------------------------------------------------------ state ---
 const S = {
-  view: "home", library: [], libFilter: "all", libQuery: "",
+  view: "home", library: [], libFilter: "all", libQuery: "", schedules: [], editing: null,
   sessions: [], cfg: {}, current: null, ws: null, lastSeq: {}, replaying: false, filter: "",
   title: "", status: "idle", live: "", plan: [], planOpen: false,
   turns: [], steps: [], stepIdx: {}, dirty: new Set(), finalized: new Set(),
@@ -222,19 +225,23 @@ function scheduleRender(scrollEnd = false) {
 }
 
 function renderAll() {
-  const lib = S.view === "library";
+  const auto = S.view === "automations";
+  const lib = S.view === "library" || auto; // full-page views without a composer dock
   const home = !S.current && !lib;
   $("#home").classList.toggle("hidden", !home);
-  $("#library").classList.toggle("hidden", !lib);
+  $("#library").classList.toggle("hidden", S.view !== "library");
+  $("#automations").classList.toggle("hidden", !auto);
+  $("#nav-auto").classList.toggle("active", auto);
   $("#scroller").classList.toggle("hidden", home || lib);
   $("#dock").classList.toggle("hidden", home || lib);
-  $("#nav-library").classList.toggle("active", lib);
+  $("#nav-library").classList.toggle("active", S.view === "library");
   (home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  const title = lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  const title = auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
   ["#share-btn", "#delete-btn"].forEach((s) => $(s).classList.toggle("hidden", home || lib));
   $("#panel-btn").classList.toggle("hidden", home || lib || !S.steps.length || S.panel.open);
+  if (auto) { renderAutomations(); renderPanel(); return; }
   if (lib) { renderLibrary(); renderPanel(); return; }
   if (home) { renderPanel(); return; }
 
@@ -355,6 +362,7 @@ function summarize(steps) {
     else if (n.startsWith("shell_")) c.term++;
     else if (n === "agent_map_reduce") c.mr++;
     else if (n.startsWith("deploy_")) c.dep++;
+    else if (n.startsWith("schedule_")) c.sched = (c.sched || 0) + 1;
   }
   const parts = [];
   if (c.q) parts.push(`已搜索 ${c.q} 个查询`);
@@ -367,6 +375,7 @@ function summarize(steps) {
   if (c.find) parts.push(`搜索了 ${c.find} 次文件`);
   if (c.mr) parts.push(`并行执行了 ${c.mr} 批子任务`);
   if (c.dep) parts.push(`部署了 ${c.dep} 个服务`);
+  if (c.sched) parts.push(`创建了 ${c.sched} 个定时任务`);
   return parts.join(" · ") || `执行了 ${steps.length} 个步骤`;
 }
 
@@ -546,6 +555,7 @@ function stepView(s) {
   if (d.textEditor) return editorHtml(d.textEditor);
   if (d.mapReduce) return `<div class="mr">${d.mapReduce.taskDetails.map((t) => `<div class="mr-row"><span class="s ${t.status}">${{ pending: "○", running: "◌", completed: "✓", failed: "✕" }[t.status] || ""}</span><div class="b"><div>${t.index + 1}. ${esc(t.item)}</div>` +
     (t.status === "running" && t.progress ? `<div class="p">${esc(t.progress)}</div>` : "") + (t.result ? `<details><summary>结果</summary><div class="prose">${md(t.result)}</div></details>` : "") + `</div></div>`).join("")}</div>`;
+  if (d.schedule) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${autoCardHtml(d.schedule, false)}</div></div>`;
   if (d.deploy) return `<div class="urlbar">${icon("globe")}<a href="${esc(d.deploy.url)}" target="_blank">${esc(d.deploy.url)}</a></div><iframe class="preview-frame" style="height:calc(100% - 37px)" src="${esc(d.deploy.url)}"></iframe>`;
   if (d.error) return `<div class="err-view"><div class="term">${esc(d.error)}</div></div>`;
   if (s.status === "start" || s.status === "running") return `<div class="pc-empty"><span class="shimmer">${esc(s.brief || zh(s.message?.action))}</span></div>`;
@@ -626,7 +636,7 @@ function renderSessions() {
   const q = S.filter.trim().toLowerCase();
   const list = S.sessions.filter((s) => !q || String(s.title).toLowerCase().includes(q));
   $("#session-list").innerHTML = list.map((s) => `<div class="session-item ${s.id === S.current ? "active" : ""}" data-id="${esc(s.id)}">` +
-    `<span class="s-ico">${s.status === "running" ? icon("loader", "spin-i") : icon(s.status === "error" ? "alert" : "message")}</span>` +
+    `<span class="s-ico">${s.status === "running" ? icon("loader", "spin-i") : icon(s.status === "error" ? "alert" : s.scheduleId ? "clock" : "message")}</span>` +
     `<span class="s-title">${esc(s.title)}</span><button class="s-more" data-del="${esc(s.id)}" title="删除">${icon("trash")}</button></div>`).join("") ||
     `<div class="session-empty">${q ? "没有匹配的任务" : "暂无任务"}</div>`;
   $("#session-list").querySelectorAll(".spin-i").forEach((n) => (n.style.animation = "spin 1s linear infinite"));
@@ -686,6 +696,91 @@ function openViewer(f) {
   renderFileBody({ url: f.url, name: f.filename, path: f.path }, body, () => S.viewing === f);
 }
 function closeViewer() { $("#viewer").classList.add("hidden"); S.viewing = null; }
+
+// ------------------------------------------------------------------ automations (自动化) ---
+const fmtTs = (sec) => (sec ? new Date(sec * 1000).toLocaleString("zh-CN", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+
+async function openAutomations() {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "automations";
+  history.replaceState(null, "", "#automations");
+  renderSessions();
+  await loadSchedules();
+}
+async function loadSchedules() {
+  try { S.schedules = await (await fetch("/api/schedules")).json(); } catch { S.schedules = []; }
+  scheduleRender();
+}
+
+function autoCardHtml(s, actions = true) {
+  const runs = (s.runs || []).slice(0, 3).map((id) => {
+    const sess = S.sessions.find((x) => x.id === id);
+    return `<a href="#${esc(id)}" data-goto="${esc(id)}">${icon("message")}${esc(sess?.title || id)}</a>`;
+  }).join("");
+  return `<div class="auto-top"><span class="auto-ico">${icon("clock")}</span><div class="auto-main"><div class="auto-title">${esc(s.title)}</div>` +
+    `<div class="auto-when">${esc(s.description)}${s.enabled ? ` · 下次运行 ${fmtTs(s.nextRunAt)}` : " · 已暂停"}</div></div>` +
+    (actions ? `<button class="switch ${s.enabled ? "on" : ""}" data-sched="toggle" data-id="${esc(s.id)}" title="${s.enabled ? "暂停" : "启用"}"><i></i></button>` : "") + `</div>` +
+    `<div class="auto-prompt">${esc(s.prompt)}</div>` +
+    (actions ? `<div class="auto-foot"><div class="auto-runs">${runs ? `<span>最近运行</span>${runs}` : `<span>还没有运行过</span>`}</div>` +
+      `<button class="btn ghost sm" data-sched="run" data-id="${esc(s.id)}">${icon("play2")}立即运行</button>` +
+      `<button class="icon-btn sm" data-sched="edit" data-id="${esc(s.id)}" title="编辑">${icon("pencil")}</button>` +
+      `<button class="icon-btn sm" data-sched="del" data-id="${esc(s.id)}" title="删除">${icon("trash")}</button></div>` : "");
+}
+
+function renderAutomations() {
+  $("#auto-list").innerHTML = S.schedules.length ? S.schedules.map((s) => `<div class="auto-card ${s.enabled ? "" : "off"}">${autoCardHtml(s)}</div>`).join("")
+    : `<div class="lib-empty">${icon("clock")}<div>还没有定时任务</div><div class="muted">点击右上角「新建定时任务」，或在对话中让 OpenManus 帮你创建</div></div>`;
+}
+
+function openSchedForm(s) {
+  S.editing = s || null;
+  const f = $("#sched-form");
+  f.reset();
+  $("#sched-form-title").textContent = s ? "编辑定时任务" : "新建定时任务";
+  $("#sched-err").textContent = "";
+  if (s) {
+    f.title.value = s.title; f.prompt.value = s.prompt; f.kind.value = s.schedule.kind;
+    if (s.schedule.time) f.time.value = s.schedule.time;
+    if (s.schedule.weekday !== undefined) f.weekday.value = s.schedule.weekday;
+    if (s.schedule.everyMinutes) f.everyMinutes.value = s.schedule.everyMinutes;
+    if (s.schedule.at) f.at.value = s.schedule.at;
+  } else {
+    const t = new Date(Date.now() + 3600e3); t.setMinutes(0, 0, 0);
+    f.at.value = new Date(t - t.getTimezoneOffset() * 60e3).toISOString().slice(0, 16);
+  }
+  syncSchedFields();
+  $("#sched-modal").classList.remove("hidden");
+  f.prompt.focus();
+}
+function syncSchedFields() {
+  const kind = $("#sched-form").kind.value;
+  $("#sched-form").querySelectorAll("[data-for]").forEach((n) => n.classList.toggle("hidden", !n.dataset.for.split(" ").includes(kind)));
+}
+async function saveSched(e) {
+  e.preventDefault();
+  const f = e.target;
+  const kind = f.kind.value;
+  const schedule = { kind };
+  if (kind === "once") schedule.at = f.at.value;
+  if (kind === "interval") schedule.everyMinutes = +f.everyMinutes.value;
+  if (kind === "daily" || kind === "weekly") schedule.time = f.time.value;
+  if (kind === "weekly") schedule.weekday = +f.weekday.value;
+  const body = { title: f.title.value.trim() || f.prompt.value.trim().slice(0, 30), prompt: f.prompt.value, schedule };
+  const r = await fetch(S.editing ? `/api/schedules/${S.editing.id}` : "/api/schedules",
+    { method: S.editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) { $("#sched-err").textContent = (await r.json().catch(() => ({}))).detail || "保存失败"; return; }
+  $("#sched-modal").classList.add("hidden");
+  loadSchedules();
+}
+async function schedAction(a, id) {
+  const s = S.schedules.find((x) => x.id === id);
+  if (!s) return;
+  if (a === "toggle") await fetch(`/api/schedules/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !s.enabled }) });
+  if (a === "del") { if (!confirm(`删除定时任务「${s.title}」？已运行的任务会保留。`)) return; await fetch(`/api/schedules/${id}`, { method: "DELETE" }); }
+  if (a === "edit") return openSchedForm(s);
+  if (a === "run") { const r = await (await fetch(`/api/schedules/${id}/run`, { method: "POST" })).json(); await refreshSessions(); openSession(r.sessionId); return; }
+  loadSchedules();
+}
 
 function openSession(sid) {
   S.view = sid ? "session" : "home";
@@ -751,6 +846,18 @@ function bind() {
   const newTask = () => goHome();
   $("#new-task").onclick = newTask; $("#new-task-2").onclick = newTask;
   $("#nav-library").onclick = openLibrary;
+  $("#nav-auto").onclick = openAutomations;
+  $("#auto-new").onclick = () => openSchedForm(null);
+  $("#auto-list").onclick = (e) => {
+    const g = e.target.closest("[data-goto]");
+    if (g) { e.preventDefault(); openSession(g.dataset.goto); return; }
+    const b = e.target.closest("[data-sched]");
+    if (b) schedAction(b.dataset.sched, b.dataset.id);
+  };
+  $("#sched-form").onsubmit = saveSched;
+  $("#sched-form").kind.onchange = syncSchedFields;
+  $("#sched-close").onclick = $("#sched-cancel").onclick = () => $("#sched-modal").classList.add("hidden");
+  $("#sched-modal").onclick = (e) => { if (e.target.id === "sched-modal") $("#sched-modal").classList.add("hidden"); };
   $("#lib-search").oninput = (e) => { S.libQuery = e.target.value; renderLibrary(); };
   $("#lib-tabs").onclick = (e) => { const b = e.target.closest("[data-tab]"); if (b) { S.libFilter = b.dataset.tab; renderLibrary(); } };
   $("#lib-list").onclick = (e) => {
@@ -853,6 +960,7 @@ async function deleteSession(sid) {
   await refreshSessions();
   const sid = location.hash.slice(1);
   if (sid === "library") openLibrary();
+  else if (sid === "automations") openAutomations();
   else openSession(sid && S.sessions.some((s) => s.id === sid) ? sid : null);
   autoGrow();
 })();

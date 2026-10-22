@@ -38,6 +38,7 @@ class Session(AgentHost):
         self.pending_confirms: dict[str, asyncio.Future] = {}
         self.approved: set[str] = set()
         self.files: dict[str, dict] = {}  # sandbox path -> stored copy (survives the sandbox)
+        self.schedule_id: str | None = None  # set when a scheduled task started this session
         self.task: asyncio.Task | None = None
         self.subscribers: set[asyncio.Queue] = set()
         self.dir = config.SESSIONS_DIR / sid
@@ -50,7 +51,7 @@ class Session(AgentHost):
 
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
-                "status": self.status, "plan": self.plan}
+                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id}
 
     def persist(self) -> None:
         (self.dir / "meta.json").write_text(json.dumps({**self.meta(), "envAnnounced": self.env_announced,
@@ -64,6 +65,7 @@ class Session(AgentHost):
         s.plan = meta.get("plan", [])
         s.env_announced = meta.get("envAnnounced", False)
         s.files = meta.get("files", {})
+        s.schedule_id = meta.get("scheduleId")
         s.status = meta.get("status", "idle")
         if s.status in ("running", "waiting"):
             s.status = "stopped"  # process restarted mid-run
@@ -162,6 +164,12 @@ class Session(AgentHost):
                             "createdAt": prev.get("createdAt") or time.time(), "updatedAt": time.time()}
         self.persist()
 
+    def create_schedule(self, a: dict) -> dict:
+        from .scheduler import scheduler
+        spec = {"kind": a.get("kind"), "at": a.get("at"), "everyMinutes": a.get("every_minutes"),
+                "time": a.get("time"), "weekday": a.get("weekday")}
+        return scheduler.create(a.get("title", ""), a.get("prompt", ""), spec, source=self.session_id)
+
     def stored_file(self, path: str) -> tuple[Path, dict] | None:
         meta = self.files.get(path)
         p = self.dir / "files" / meta["stored"] if meta else None
@@ -225,7 +233,8 @@ class Session(AgentHost):
             if not self.env_announced:
                 system_notes.append(
                     f"<environment>\nSandbox OS: Linux ({sandbox.mode} sandbox)\nWorking directory: {sandbox.workdir}\n"
-                    f"User uploads: {sandbox.workdir}/upload\nCurrent date: {time.strftime('%Y-%m-%d')}\n</environment>")
+                    f"User uploads: {sandbox.workdir}/upload\nCurrent date: {time.strftime('%Y-%m-%d %H:%M')} "
+                    f"({config.UTC_LABEL}, the user's local time; schedules use it too)\n</environment>")
                 if catalog := skills.catalog(sandbox):
                     system_notes.append(catalog)
                 self.env_announced = True
