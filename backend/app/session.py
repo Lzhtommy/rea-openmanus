@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
+import mimetypes
 import logging
 import time
 from pathlib import Path
@@ -35,11 +37,13 @@ class Session(AgentHost):
         self.pending_reply: asyncio.Future | None = None
         self.pending_confirms: dict[str, asyncio.Future] = {}
         self.approved: set[str] = set()
+        self.files: dict[str, dict] = {}  # sandbox path -> stored copy (survives the sandbox)
         self.task: asyncio.Task | None = None
         self.subscribers: set[asyncio.Queue] = set()
         self.dir = config.SESSIONS_DIR / sid
         self.dir.mkdir(parents=True, exist_ok=True)
         (self.dir / "shots").mkdir(exist_ok=True)
+        (self.dir / "files").mkdir(exist_ok=True)
         self.env_announced = False
 
     # ------------------------------------------------------- persistence ---
@@ -49,7 +53,8 @@ class Session(AgentHost):
                 "status": self.status, "plan": self.plan}
 
     def persist(self) -> None:
-        (self.dir / "meta.json").write_text(json.dumps({**self.meta(), "envAnnounced": self.env_announced}))
+        (self.dir / "meta.json").write_text(json.dumps({**self.meta(), "envAnnounced": self.env_announced,
+                                                        "files": self.files}, ensure_ascii=False))
         (self.dir / "messages.json").write_text(json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
@@ -58,6 +63,7 @@ class Session(AgentHost):
         s = cls(meta["id"], meta.get("title", "Task"), meta.get("createdAt"))
         s.plan = meta.get("plan", [])
         s.env_announced = meta.get("envAnnounced", False)
+        s.files = meta.get("files", {})
         s.status = meta.get("status", "idle")
         if s.status in ("running", "waiting"):
             s.status = "stopped"  # process restarted mid-run
@@ -125,6 +131,41 @@ class Session(AgentHost):
             return False
         fut.set_result(approved)
         return True
+
+    # ------------------------------------------------------- file store ---
+    # Copies of deliverables, files the agent wrote, and uploads, kept outside the sandbox (Manus
+    # syncs sandbox files to object storage) so they outlive the container and feed the library.
+
+    MAX_KEEP = 50 * 1024 * 1024
+
+    async def keep_file(self, path: str, kind: str) -> None:
+        from .sandbox import SandboxError
+        sb = manager.sandboxes.get(self.session_id)
+        if not sb:
+            return
+        if not path.startswith("/"):
+            path = f"{sb.workdir}/{path}"
+        try:
+            r = await sb.http.get("/file/download", params={"path": path})
+        except Exception as e:  # never fail a tool call because a copy could not be kept
+            log.warning("keep_file %s: %s", path, e)
+            return
+        if r.status_code != 200 or len(r.content) > self.MAX_KEEP:
+            return
+        name = path.rsplit("/", 1)[-1]
+        stored = hashlib.sha1(path.encode()).hexdigest()[:16] + (("." + name.rsplit(".", 1)[-1]) if "." in name else "")
+        (self.dir / "files" / stored).write_bytes(r.content)
+        prev = self.files.get(path, {})
+        kinds = sorted(set(prev.get("kinds", [])) | {kind})
+        self.files[path] = {"path": path, "filename": name, "size": len(r.content), "stored": stored, "kinds": kinds,
+                            "mime": r.headers.get("content-type") or mimetypes.guess_type(name)[0] or "application/octet-stream",
+                            "createdAt": prev.get("createdAt") or time.time(), "updatedAt": time.time()}
+        self.persist()
+
+    def stored_file(self, path: str) -> tuple[Path, dict] | None:
+        meta = self.files.get(path)
+        p = self.dir / "files" / meta["stored"] if meta else None
+        return (p, meta) if p and p.is_file() else None
 
     def save_shot(self, b64: str) -> str:
         name = f"{short_id()}.jpg"

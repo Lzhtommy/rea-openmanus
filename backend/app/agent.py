@@ -60,6 +60,7 @@ class AgentHost:
     async def confirm(self, action_id: str) -> bool: return True
     def save_shot(self, b64: str) -> str: return ""
     def file_url(self, path: str) -> str: return path
+    async def keep_file(self, path: str, kind: str) -> None: ...
     def preview_url(self, port: int) -> str: return ""
     def persist(self) -> None: ...
 
@@ -271,6 +272,9 @@ class Agent:
         sb, host = self.sandbox, self.host
 
         # ---- messages
+        if name in ("message_notify_user", "message_ask_user"):
+            for p in a.get("attachments") or []:
+                await host.keep_file(p, "deliverable")
         if name == "message_notify_user":
             kind = a.get("kind") or ("progress" if self.opened else "opening")
             self.opened = True
@@ -309,11 +313,13 @@ class Agent:
                                {"textEditor": {"path": r["file"], "content": r["content"][:50000], "op": "read"}})
         if name == "file_write":
             r = await sb.call("/file/write", a)
+            await host.keep_file(r["file"], "edited")
             return ToolOutcome(f"{'Appended to' if a.get('append') else 'Wrote'} {r['file']} ({r['bytes']} bytes).",
                                {"textEditor": {"path": r["file"], "content": a["content"][:50000],
                                                "op": "append" if a.get("append") else "write"}})
         if name == "file_str_replace":
             r = await sb.call("/file/str_replace", a)
+            await host.keep_file(r["file"], "edited")
             return ToolOutcome(f"Replaced text in {r['file']}.",
                                {"textEditor": {"path": r["file"], "op": "edit",
                                                "content": f"- {a['old_str']}\n+ {a['new_str']}"[:50000]}})

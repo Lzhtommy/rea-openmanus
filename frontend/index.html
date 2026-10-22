@@ -21,6 +21,7 @@
       </div>
       <div class="nav-body">
         <button class="nav-item" id="new-task"><span class="nav-ico" data-icon="newTask"></span><span class="nav-label">新建任务</span><kbd>⌘K</kbd></button>
+        <button class="nav-item" id="nav-library"><span class="nav-ico" data-icon="library"></span><span class="nav-label">资料库</span></button>
         <div class="nav-search hidden" id="nav-search"><span data-icon="search"></span><input id="search-input" placeholder="搜索任务" /></div>
         <div class="nav-section">任务</div>
         <div id="session-list"></div>
@@ -56,6 +57,14 @@
             <button class="example" data-example="打开 https://news.ycombinator.com ，总结当前首页前 10 条新闻并给出每条的链接"><span data-icon="compass"></span>总结 Hacker News</button>
             <button class="example" data-example="用 Python 生成一份 2015-2025 年中国 GDP 增速的折线图，并写一段简要分析"><span data-icon="chart"></span>数据分析与图表</button>
           </div>
+        </div>
+      </div>
+
+      <div id="library" class="hidden">
+        <div class="lib-inner">
+          <div class="lib-head"><h2>资料库</h2><div class="lib-search"><span data-icon="search"></span><input id="lib-search" placeholder="搜索文件" /></div></div>
+          <div class="lib-tabs" id="lib-tabs"></div>
+          <div id="lib-list"></div>
         </div>
       </div>
 
@@ -101,6 +110,14 @@
       </div>
       <div class="pc-foot" id="pc-foot"></div>
     </section>
+  </div>
+
+  <div id="viewer" class="hidden">
+    <div class="viewer-card">
+      <div class="viewer-head"><span class="fc-ico" id="viewer-ico"></span><div class="viewer-title"><div id="viewer-name"></div><div id="viewer-sub"></div></div>
+        <a class="icon-btn" id="viewer-dl" title="下载" data-icon="download"></a><button class="icon-btn" id="viewer-close" title="关闭" data-icon="x"></button></div>
+      <div class="viewer-body" id="viewer-body"></div>
+    </div>
   </div>
 
   <script src="app.js"></script>

@@ -204,6 +204,16 @@ async def test_full_task(store, monkeypatch):
     assert "<h1>hi</h1>" in r.text
     await sb.call("/shell/kill", {"id": "srv"})
 
+    # files the agent wrote / delivered are kept outside the sandbox and outlive it
+    from app import main
+    kept = [f for f in s.files.values() if f["filename"] == "report.md"]
+    assert kept and set(kept[0]["kinds"]) == {"edited", "deliverable"}
+    await manager.destroy(s.session_id)
+    r = await main.download(s.session_id, kept[0]["path"])
+    assert r.status_code == 200 and "# Report" in open(r.path).read()
+    lib = await main.library()
+    assert any(x["sessionId"] == s.session_id and x["filename"] == "report.md" for x in lib)
+
 
 @pytest.mark.asyncio
 async def test_ask_user_and_follow_up(store, monkeypatch):

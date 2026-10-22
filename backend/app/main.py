@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+
+import httpx
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -77,21 +79,53 @@ async def upload(sid: str, file: UploadFile = File(...)):
                            data={"dir": f"{sb.workdir}/upload"})
     if r.status_code >= 400:
         raise HTTPException(r.status_code, r.text)
-    return r.json()
+    info = r.json()
+    await _session(sid).keep_file(info["path"], "upload")
+    return info
+
+
+def _disposition(name: str) -> str:
+    # Headers are latin-1: send an ASCII fallback plus the RFC 5987 UTF-8 name for non-ASCII files.
+    fallback = name.encode("ascii", "replace").decode().replace("?", "_").replace('"', "_")
+    return f"inline; filename=\"{fallback}\"; filename*=UTF-8''{quote(name)}"
 
 
 @app.get("/api/sessions/{sid}/files")
 async def download(sid: str, path: str):
-    sb = await manager.get(_session(sid).session_id)
+    """Live from the running sandbox when possible, else the stored copy (the sandbox may be gone)."""
+    s = _session(sid)
+    name = path.rsplit("/", 1)[-1]
+    sb = manager.sandboxes.get(sid)
+    if sb:
+        try:
+            r = await sb.http.get("/file/download", params={"path": path})
+        except httpx.HTTPError:  # container gone: fall back to the stored copy
+            r, sb = None, None
+        if r is not None and r.status_code < 400:
+            return Response(r.content, media_type=r.headers.get("content-type", "application/octet-stream"),
+                            headers={"Content-Disposition": _disposition(name)})
+    if kept := s.stored_file(path):
+        p, meta = kept
+        return FileResponse(p, media_type=meta.get("mime"), headers={"Content-Disposition": _disposition(name)})
+    if sb:
+        raise HTTPException(404, "file not found")
+    sb = await manager.get(sid)  # nothing stored: start the sandbox and try there
     r = await sb.http.get("/file/download", params={"path": path})
     if r.status_code >= 400:
         raise HTTPException(r.status_code, "file not found")
-    name = path.rsplit("/", 1)[-1]
-    # Headers are latin-1: send an ASCII fallback plus the RFC 5987 UTF-8 name for non-ASCII files.
-    fallback = name.encode("ascii", "replace").decode().replace("?", "_").replace('"', "_")
-    disposition = f"inline; filename=\"{fallback}\"; filename*=UTF-8''{quote(name)}"
     return Response(r.content, media_type=r.headers.get("content-type", "application/octet-stream"),
-                    headers={"Content-Disposition": disposition})
+                    headers={"Content-Disposition": _disposition(name)})
+
+
+@app.get("/api/library")
+async def library():
+    """Every kept file across tasks, newest first (Manus' 资料库)."""
+    items = []
+    for s in session_mod.store.sessions.values():
+        for f in s.files.values():
+            items.append({**{k: f[k] for k in ("path", "filename", "size", "kinds", "mime", "createdAt", "updatedAt")},
+                          "sessionId": s.session_id, "sessionTitle": s.title, "url": s.file_url(f["path"])})
+    return sorted(items, key=lambda x: -x["updatedAt"])
 
 
 @app.get("/api/sessions/{sid}/shots/{name}")

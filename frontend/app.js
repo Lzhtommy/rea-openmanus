@@ -50,6 +50,8 @@ const ICONS = {
   image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
   code: '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>',
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/>',
+  library: '<path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   paperclip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 0 1 5.7 5.7l-8.6 8.6a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
 };
 const icon = (name, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
@@ -96,6 +98,7 @@ const zh = (a) => ACTION_ZH[a] || a || "";
 
 // ------------------------------------------------------------------ state ---
 const S = {
+  view: "home", library: [], libFilter: "all", libQuery: "",
   sessions: [], cfg: {}, current: null, ws: null, lastSeq: {}, replaying: false, filter: "",
   title: "", status: "idle", live: "", plan: [], planOpen: false,
   turns: [], steps: [], stepIdx: {}, dirty: new Set(), finalized: new Set(),
@@ -219,15 +222,20 @@ function scheduleRender(scrollEnd = false) {
 }
 
 function renderAll() {
-  const home = !S.current;
+  const lib = S.view === "library";
+  const home = !S.current && !lib;
   $("#home").classList.toggle("hidden", !home);
-  $("#scroller").classList.toggle("hidden", home);
-  $("#dock").classList.toggle("hidden", home);
-  (home ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  $("#session-title").textContent = home ? "OpenManus" : (S.title || "新任务");
-  document.title = home ? "OpenManus" : `${S.title || "新任务"} - OpenManus`;
-  ["#share-btn", "#delete-btn"].forEach((s) => $(s).classList.toggle("hidden", home));
-  $("#panel-btn").classList.toggle("hidden", home || !S.steps.length || S.panel.open);
+  $("#library").classList.toggle("hidden", !lib);
+  $("#scroller").classList.toggle("hidden", home || lib);
+  $("#dock").classList.toggle("hidden", home || lib);
+  $("#nav-library").classList.toggle("active", lib);
+  (home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
+  const title = lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  $("#session-title").textContent = title;
+  document.title = home ? "OpenManus" : `${title} - OpenManus`;
+  ["#share-btn", "#delete-btn"].forEach((s) => $(s).classList.toggle("hidden", home || lib));
+  $("#panel-btn").classList.toggle("hidden", home || lib || !S.steps.length || S.panel.open);
+  if (lib) { renderLibrary(); renderPanel(); return; }
   if (home) { renderPanel(); return; }
 
   const sc = $("#scroller");
@@ -564,14 +572,13 @@ function editorHtml(e) {
   return head + `<div class="code">${rows}</div>`;
 }
 
-async function renderFileBody(f) {
-  const body = $("#file-body");
+async function renderFileBody(f, body = $("#file-body"), still = () => S.panel.file === f) {
   const e = ext(f.name);
   if (IMG.has(e)) { body.innerHTML = `<img class="shot" src="${esc(f.url)}" alt="" />`; return; }
   if (e === "pdf") { body.innerHTML = `<iframe class="preview-frame" style="height:calc(100vh - 240px)" src="${esc(f.url)}"></iframe>`; return; }
   if (!TEXTY.has(e)) { body.innerHTML = `<div class="pc-empty" style="height:300px">${icon("fileDoc")}<span>该文件无法预览，<a href="${esc(f.url)}" download>点击下载</a></span></div>`; return; }
   const text = await fetchText(f.url);
-  if (S.panel.file !== f) return;
+  if (!still()) return;
   body.innerHTML = e === "md" || e === "markdown" ? `<div class="page-md"><div class="prose">${md(text)}</div></div>` : editorHtml({ path: f.path, content: text, op: "read" }).replace(/^<div class="file-head">.*?<\/div>/, "");
 }
 
@@ -625,7 +632,63 @@ function renderSessions() {
   $("#session-list").querySelectorAll(".spin-i").forEach((n) => (n.style.animation = "spin 1s linear infinite"));
 }
 
+// ------------------------------------------------------------------ library (资料库) ---
+// Every file kept outside the sandboxes (deliverables, files the agent wrote, uploads), across tasks.
+const LIB_TABS = [["all", "全部"], ["doc", "文档"], ["image", "图片"], ["code", "代码"], ["data", "数据"], ["other", "其他"]];
+function fileKind(name) {
+  const e = ext(name);
+  if (IMG.has(e)) return "image";
+  if (["md", "markdown", "txt", "pdf", "docx", "doc", "pptx", "html"].includes(e)) return "doc";
+  if (["py", "js", "ts", "css", "sh", "json", "yaml", "yml"].includes(e)) return "code";
+  if (["csv", "xlsx", "xls", "parquet", "sqlite"].includes(e)) return "data";
+  return "other";
+}
+const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+const fmtDate = (sec) => new Date(sec * 1000).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+async function openLibrary() {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "library";
+  history.replaceState(null, "", "#library");
+  renderSessions();
+  try { S.library = await (await fetch("/api/library")).json(); } catch { S.library = []; }
+  scheduleRender();
+}
+
+function renderLibrary() {
+  const q = S.libQuery.trim().toLowerCase();
+  const counts = Object.fromEntries(LIB_TABS.map(([k]) => [k, 0]));
+  S.library.forEach((f) => { counts.all++; counts[fileKind(f.filename)]++; });
+  $("#lib-tabs").innerHTML = LIB_TABS.filter(([k]) => k === "all" || counts[k]).map(([k, label]) =>
+    `<button class="lib-tab ${S.libFilter === k ? "on" : ""}" data-tab="${k}">${label}<span>${counts[k]}</span></button>`).join("");
+  const rows = S.library.filter((f) => (S.libFilter === "all" || fileKind(f.filename) === S.libFilter) &&
+    (!q || f.filename.toLowerCase().includes(q) || String(f.sessionTitle).toLowerCase().includes(q)));
+  $("#lib-list").innerHTML = rows.length ? rows.map((f, i) => {
+    const [ic, cls] = fileIconCls(f.filename);
+    const tag = f.kinds.includes("deliverable") ? "交付" : f.kinds.includes("upload") ? "上传" : "生成";
+    return `<div class="lib-row" data-lib="${S.library.indexOf(f)}"><span class="fc-ico ${cls}">${icon(ic)}</span>` +
+      `<div class="lib-main"><div class="lib-name">${esc(f.filename)}<span class="lib-tag">${tag}</span></div>` +
+      `<div class="lib-sub"><a href="#${esc(f.sessionId)}" data-goto="${esc(f.sessionId)}">${icon("message")}${esc(f.sessionTitle)}</a><span>${fmtSize(f.size)}</span><span>${fmtDate(f.updatedAt)}</span></div></div>` +
+      `<a class="icon-btn" href="${esc(f.url)}" download="${esc(f.filename)}" title="下载">${icon("download")}</a></div>`;
+  }).join("") : `<div class="lib-empty">${icon("folder")}<div>${S.library.length ? "没有匹配的文件" : "还没有文件"}</div><div class="muted">任务中生成、交付和上传的文件都会保存在这里</div></div>`;
+}
+
+function openViewer(f) {
+  const [ic, cls] = fileIconCls(f.filename);
+  $("#viewer-ico").className = `fc-ico ${cls}`; $("#viewer-ico").innerHTML = icon(ic);
+  $("#viewer-name").textContent = f.filename;
+  $("#viewer-sub").textContent = `${f.sessionTitle} · ${fmtSize(f.size)} · ${fmtDate(f.updatedAt)}`;
+  $("#viewer-dl").href = f.url; $("#viewer-dl").setAttribute("download", f.filename);
+  $("#viewer").classList.remove("hidden");
+  const body = $("#viewer-body");
+  body.innerHTML = `<div class="pc-empty" style="height:200px"><span class="shimmer">加载中</span></div>`;
+  S.viewing = f;
+  renderFileBody({ url: f.url, name: f.filename, path: f.path }, body, () => S.viewing === f);
+}
+function closeViewer() { $("#viewer").classList.add("hidden"); S.viewing = null; }
+
 function openSession(sid) {
+  S.view = sid ? "session" : "home";
   if (S.current && S.current !== sid) send({ type: "leave_session", sessionId: S.current });
   S.current = sid; S.lastSeq[sid] = -1;
   history.replaceState(null, "", sid ? `#${sid}` : "#");
@@ -687,6 +750,18 @@ function bind() {
 
   const newTask = () => goHome();
   $("#new-task").onclick = newTask; $("#new-task-2").onclick = newTask;
+  $("#nav-library").onclick = openLibrary;
+  $("#lib-search").oninput = (e) => { S.libQuery = e.target.value; renderLibrary(); };
+  $("#lib-tabs").onclick = (e) => { const b = e.target.closest("[data-tab]"); if (b) { S.libFilter = b.dataset.tab; renderLibrary(); } };
+  $("#lib-list").onclick = (e) => {
+    if (e.target.closest("a[download]")) return;
+    const g = e.target.closest("[data-goto]");
+    if (g) { e.preventDefault(); openSession(g.dataset.goto); return; }
+    const row = e.target.closest("[data-lib]");
+    if (row) openViewer(S.library[+row.dataset.lib]);
+  };
+  $("#viewer-close").onclick = closeViewer;
+  $("#viewer").onclick = (e) => { if (e.target.id === "viewer") closeViewer(); };
   $("#brand").onclick = (e) => { e.preventDefault(); goHome(); };
   const collapse = (v) => { document.body.classList.toggle("nav-collapsed", v); store.set("nav-collapsed", v ? "1" : "0"); };
   $("#nav-collapse").onclick = () => collapse(true);
@@ -741,6 +816,7 @@ function bind() {
 
   document.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); goHome(); }
+    if (e.key === "Escape" && S.viewing) { closeViewer(); return; }
     if (e.key === "Escape" && S.panel.full) { S.panel.full = false; scheduleRender(); }
   });
   setInterval(() => { const t = lastTurn(); if (t && !isFinished(t)) { S.dirty.add(t); scheduleRender(); } }, 1000);
@@ -776,6 +852,7 @@ async function deleteSession(sid) {
   } catch { /* backend not reachable yet */ }
   await refreshSessions();
   const sid = location.hash.slice(1);
-  openSession(sid && S.sessions.some((s) => s.id === sid) ? sid : null);
+  if (sid === "library") openLibrary();
+  else openSession(sid && S.sessions.some((s) => s.id === sid) ? sid : null);
   autoGrow();
 })();
