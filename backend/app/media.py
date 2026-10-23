@@ -72,8 +72,21 @@ async def generate_image(prompt: str, references: list[tuple[bytes, str]] | None
 
 async def generate_speech(text: str, voice: str = "") -> bytes:
     model = config.TTS_MODEL
-    if not model:
-        raise MediaError("speech generation is not configured (MANUS_TTS_MODEL)")
+    if not model:  # fallback: Microsoft Edge's online neural voices (no key needed)
+        try:
+            import edge_tts
+            name = voice if voice.count("-") >= 2 and voice.endswith("Neural") else config.TTS_FALLBACK_VOICE
+            data = b""
+            async for chunk in edge_tts.Communicate(text, name).stream():
+                if chunk["type"] == "audio":
+                    data += chunk["data"]
+            if not data:
+                raise MediaError("no audio returned")
+            return data
+        except MediaError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise MediaError(f"speech generation failed: {e}")
     c = _client()
     try:
         r = await c.audio.speech.create(model=model, voice=voice or config.TTS_VOICE, input=text, response_format="mp3")
@@ -119,4 +132,4 @@ async def generate_video(prompt: str, seconds: int = 8, reference: tuple[bytes, 
 
 
 def capabilities() -> dict:
-    return {"image": bool(config.IMAGE_MODEL), "speech": bool(config.TTS_MODEL), "video": bool(config.VIDEO_MODEL)}
+    return {"image": bool(config.IMAGE_MODEL), "speech": True, "video": bool(config.VIDEO_MODEL or config.IMAGE_MODEL)}

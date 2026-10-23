@@ -799,7 +799,7 @@ async def test_slides_and_media(store, monkeypatch):
     assert all(e["status"] == "success" for e in imgs) and imgs[0]["detail"]["media"]["kind"] == "image"
     assert calls[0][2] == "1:1" and calls[1][1] == ["image/png"]  # the reference was read from the sandbox
     vid = next(e for e in done.values() if e["name"] == "media_generate_video")
-    assert vid["status"] == "error" and "not configured" in vid["detail"]["error"]
+    assert vid["status"] == "success" and vid["detail"]["media"]["kind"] == "video", vid["detail"]  # key-frame fallback without a video model
     sent = next(b for m in s.messages if m["role"] == "user" for b in m["content"] if isinstance(b, dict)
                 and b.get("type") == "tool_result" and isinstance(b.get("content"), list))
     assert any(x.get("type") == "image" for x in sent["content"])  # the model sees a preview of its image

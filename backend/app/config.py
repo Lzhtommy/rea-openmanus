@@ -71,6 +71,7 @@ FEISHU_AUTO_SIGNUP = os.environ.get("MANUS_FEISHU_AUTO_SIGNUP", "true").lower() 
 IMAGE_MODEL = os.environ.get("MANUS_IMAGE_MODEL", "")
 TTS_MODEL = os.environ.get("MANUS_TTS_MODEL", "")
 TTS_VOICE = os.environ.get("MANUS_TTS_VOICE", "alloy")
+TTS_FALLBACK_VOICE = os.environ.get("MANUS_TTS_FALLBACK_VOICE", "zh-CN-XiaoxiaoNeural")  # Edge voice when no TTS model
 VIDEO_MODEL = os.environ.get("MANUS_VIDEO_MODEL", "")
 # Observations longer than this are written to a sandbox file and replaced by a
 # head/tail excerpt plus the path (Manus' "restorable compression").

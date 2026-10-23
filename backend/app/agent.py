@@ -584,6 +584,8 @@ class Agent:
                 data = await media.generate_image(a["prompt"], refs, a.get("aspect_ratio") or "16:9")
             elif kind == "speech":
                 data = await media.generate_speech(a["text"], a.get("voice") or "")
+            elif not config.VIDEO_MODEL:  # fallback: an AI key frame animated with a slow zoom (ffmpeg)
+                return await self._still_video(a, read)
             else:
                 ref = await read(a["reference_image"]) if a.get("reference_image") else None
                 data = await media.generate_video(a["prompt"], int(a.get("seconds") or 8), ref, a.get("aspect_ratio") or "16:9",
@@ -606,6 +608,32 @@ class Agent:
                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": _preview(data)}}]
         return ToolOutcome(content, {"media": {"kind": what, "path": path, "url": host.file_url(path),
                                                "prompt": a.get("prompt") or a.get("text", "")[:500]}})
+
+    async def _still_video(self, a: dict, read) -> ToolOutcome:
+        sb, host = self.sandbox, self.host
+        aspect = a.get("aspect_ratio") or "16:9"
+        try:
+            frame = (await read(a["reference_image"]))[0] if a.get("reference_image") else \
+                await media.generate_image(a["prompt"] + " (cinematic still frame)", None, aspect)
+        except media.MediaError as e:
+            return ToolOutcome(f"video generation failed: {e}", is_error=True, detail={"error": str(e)})
+        out = a["output_path"] if a["output_path"].startswith("/") else f"{sb.workdir}/{a['output_path']}"
+        tmp = f"{sb.workdir}/.manus/frame-{short_id()}.png"
+        await sb.http.post("/file/upload", files={"file": (tmp.rsplit("/", 1)[1], frame)}, data={"dir": tmp.rsplit("/", 1)[0]})
+        secs = max(2, min(int(a.get("seconds") or 6), 20))
+        w, h = {"16:9": (1280, 720), "9:16": (720, 1280), "1:1": (1024, 1024)}.get(aspect, (1280, 720))
+        cmd = ('export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; '
+               f"mkdir -p \"$(dirname '{out}')\" && ffmpeg -y -loglevel error -loop 1 -i '{tmp}' -vf "
+               f"\"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
+               f"zoompan=z='min(zoom+0.0012,1.25)':d={secs * 25}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=25\" "
+               f"-t {secs} -c:v libx264 -pix_fmt yuv420p '{out}'")
+        r = await sb.call("/shell/exec", {"id": "media", "command": cmd, "timeout": 180})
+        if r.get("returncode") != 0:
+            return ToolOutcome(f"video rendering failed: {r.get('output', '')[-500:]}", is_error=True, detail={"error": f"ffmpeg failed: {r.get('output', '')[-300:]}"})
+        await host.keep_file(out, "edited")
+        return ToolOutcome(f"No video model is configured, so this is a {secs}s clip of one AI-generated key frame with a slow "
+                           f"zoom, saved to {out}. Tell the user it is not real motion video.",
+                           {"media": {"kind": "video", "path": out, "url": host.file_url(out), "prompt": a["prompt"]}})
 
     def _attachments(self, paths: list[str] | None) -> list[dict]:
         return [{"path": p, "filename": p.rsplit("/", 1)[-1], "url": self.host.file_url(p)} for p in (paths or [])]
