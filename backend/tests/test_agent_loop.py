@@ -578,3 +578,31 @@ async def test_download_non_ascii_filename(store):
     disp.encode("latin-1")  # must be a valid header value
     assert "filename*=UTF-8''%E6%97%A0%E4%BA%BA%E6%9C%BA%E6%8A%A5%E5%91%8A.md" in disp
     assert r.body.decode() == "# 报告"
+
+
+@pytest.mark.asyncio
+async def test_personalization(store, monkeypatch, tmp_path):
+    """Profile, custom instructions and accepted knowledge reach the agent; agent proposals wait for the user."""
+    from app import main, personal
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    personal.store = personal.Personal()
+    personal.store.update({"profile": {"nickname": "小李", "occupation": "无人机工程师"}, "instructions": "回答尽量简洁"})
+    personal.store.add("单位", "金额统一用亿元")
+    model = ScriptedModel([msg(tool("knowledge_save", title="语言", content="报告默认使用中文")), msg(tool("idle")),
+                           msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("以后报告都用中文", [])
+    await wait_status(s, {"idle"})
+    note = next(m["content"] for m in s.messages if m["role"] == "system")
+    assert "小李" in note and "回答尽量简洁" in note and "金额统一用亿元" in note
+    proposed = next(k for k in personal.store.knowledge.values() if k["source"] == "agent")
+    assert proposed["pending"] and "报告默认使用中文" not in personal.store.note()
+    ev = next(e for e in s.events if e["type"] == "toolUsed" and e.get("name") == "knowledge_save" and e["status"] == "success")
+    assert ev["detail"]["knowledge"]["id"] == proposed["id"]
+    await main.edit_knowledge(proposed["id"], {"accept": True})
+    # the next run re-sends the note because it changed; unchanged notes are not repeated
+    await s.user_message("继续", [])
+    await wait_status(s, {"idle"})
+    notes = [m["content"] for m in s.messages if m["role"] == "system" and "<knowledge>" in m["content"]]
+    assert len(notes) == 2 and "报告默认使用中文" in notes[-1]

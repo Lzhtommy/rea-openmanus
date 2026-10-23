@@ -24,6 +24,10 @@
         <button class="nav-item" id="nav-auto"><span class="nav-ico" data-icon="clock"></span><span class="nav-label">自动化</span></button>
         <button class="nav-item" id="nav-conn"><span class="nav-ico" data-icon="plug"></span><span class="nav-label">连接器</span></button>
         <button class="nav-item" id="nav-library"><span class="nav-ico" data-icon="library"></span><span class="nav-label">资料库</span></button>
+        <div class="more-wrap"><button class="nav-item" id="nav-more"><span class="nav-ico" data-icon="more"></span><span class="nav-label">更多</span></button>
+          <div class="more-menu hidden" id="more-menu">
+            <button class="mode-item" data-goto-view="personal"><span data-icon="user"></span>个性化</button>
+          </div></div>
         <div class="nav-search hidden" id="nav-search"><span data-icon="search"></span><input id="search-input" placeholder="搜索任务" /></div>
         <div class="nav-section">项目</div>
         <button class="nav-item" id="new-project"><span class="nav-ico" data-icon="folderPlus"></span><span class="nav-label">新项目</span></button>
@@ -87,6 +91,26 @@
           <div class="lib-head"><h2>连接器</h2><button class="btn primary" id="conn-new">添加连接器</button></div>
           <p class="auto-intro">通过 MCP 把外部工具和数据接入 OpenManus。Agent 会按需搜索并调用这些工具；未标记为只读的工具在调用前会请你确认。</p>
           <div id="conn-list"></div>
+        </div>
+      </div>
+
+      <div id="personal" class="hidden">
+        <div class="lib-inner">
+          <div class="lib-head"><h2>个性化</h2></div>
+          <div class="lib-tabs" id="pers-tabs"><button class="lib-tab on" data-ptab="profile">个人资料</button><button class="lib-tab" data-ptab="knowledge">知识</button></div>
+          <form id="pers-profile" autocomplete="off">
+            <div class="import-card"><span class="auto-ico" data-icon="download"></span><div class="auto-main"><div class="auto-title">从其他 AI 导入记忆</div><div class="auto-when">使用其他 AI 助手记住的内容，自动填写你的个人资料和知识。</div></div><button type="button" class="btn ghost sm" id="import-open">导入记忆</button></div>
+            <label>昵称<input name="nickname" maxlength="40" placeholder="OpenManus 该如何称呼你" /></label>
+            <label>职业<input name="occupation" maxlength="60" placeholder="例如：产品经理、无人机算法工程师" /></label>
+            <label>更多关于你的信息<textarea name="about" rows="4" maxlength="2000" placeholder="你的兴趣、价值观或偏好"></textarea><span class="count" data-count="about">0 / 2000</span></label>
+            <div class="muted small">OpenManus 会用这些信息为所有任务定制回复。</div>
+            <label>自定义指令<textarea name="instructions" rows="6" maxlength="3000" placeholder="希望 OpenManus 在每个任务中都遵守的要求，例如：先给结论再展开；报告使用中文；金额单位用亿元"></textarea><span class="count" data-count="instructions">0 / 3000</span></label>
+            <div class="cc-actions" style="padding:0"><span class="muted" id="pers-saved"></span><span class="spacer"></span><button type="submit" class="btn primary">保存</button></div>
+          </form>
+          <div id="pers-knowledge" class="hidden">
+            <div class="lib-head" style="margin:0 0 12px"><p class="auto-intro" style="margin:0">OpenManus 会在之后的任务中参考已启用的知识。任务中它也可能提议记住某些内容，由你决定是否接受。</p><button class="btn primary sm" id="know-new">添加知识</button></div>
+            <div id="know-list"></div>
+          </div>
         </div>
       </div>
 
@@ -196,6 +220,32 @@
       </div>
       <div class="cc-actions"><button type="button" class="btn ghost" id="conn-cancel">取消</button><button type="submit" class="btn primary" id="conn-save">连接</button></div>
     </form>
+  </div>
+
+  <div id="know-modal" class="hidden">
+    <form class="sched-card" id="know-form" autocomplete="off">
+      <div class="viewer-head"><div class="viewer-title"><div id="know-form-title" style="font-size:16px;font-weight:500">添加知识</div></div><button type="button" class="icon-btn" id="know-close" data-icon="x"></button></div>
+      <div class="sched-body">
+        <label>标题<input name="title" maxlength="80" placeholder="例如：报告语言" /></label>
+        <label>内容<textarea name="content" rows="4" maxlength="2000" placeholder="例如：所有报告默认使用中文，并在开头给出结论" required></textarea></label>
+        <div class="sched-err" id="know-err"></div>
+      </div>
+      <div class="cc-actions"><button type="button" class="btn ghost" id="know-cancel">取消</button><button type="submit" class="btn primary">保存</button></div>
+    </form>
+  </div>
+
+  <div id="import-modal" class="hidden">
+    <div class="sched-card import-modal">
+      <div class="viewer-head"><div class="viewer-title"><div style="font-size:16px;font-weight:500">从其他 AI 导入记忆</div></div><button type="button" class="icon-btn" id="import-close" data-icon="x"></button></div>
+      <div class="sched-body">
+        <div class="share-desc">1. 把下面这段话发给你常用的 AI 助手（ChatGPT、Claude、豆包等）：</div>
+        <div class="share-link"><input id="import-prompt" readonly value="请列出你记住的关于我的所有信息：我的名字、职业、工作内容、兴趣，以及我对回答方式的偏好。逐条列出，不要遗漏，也不要编造。" /><button class="btn ghost sm" id="import-copy">复制</button></div>
+        <label>2. 把它的回答粘贴到这里<textarea id="import-text" rows="7" placeholder="粘贴 AI 助手的回答"></textarea></label>
+        <div id="import-result"></div>
+        <div class="sched-err" id="import-err"></div>
+      </div>
+      <div class="cc-actions"><button type="button" class="btn ghost" id="import-cancel">取消</button><button class="btn primary" id="import-run">解析</button></div>
+    </div>
   </div>
 
   <div id="share-modal" class="hidden">

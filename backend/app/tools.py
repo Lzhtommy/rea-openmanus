@@ -145,6 +145,15 @@ _TOOLS = [
         "kind": {"type": "string", "enum": ["once", "interval", "daily", "weekly"]},
         "at": S, "every_minutes": I, "time": S, "weekday": I},
        ["title", "prompt", "kind"]),
+    # ---- knowledge (long-term memory across tasks)
+    _t("knowledge_save",
+       "Propose a durable fact or preference to remember for future tasks (e.g. the user's preferred report "
+       "language, their company, a recurring constraint). The user accepts or dismisses it in the UI; it does not "
+       "change this task. Only for stable, reusable information the user stated or clearly implied, never for "
+       "one-off task details or secrets.",
+       {"title": {"type": "string", "description": "Short label"},
+        "content": {"type": "string", "description": "The fact or preference, self-contained"}},
+       ["content"]),
     # ---- control
     _t("idle",
        "Enter standby: the task is complete (or the user asked to stop). Sub-agents must "
@@ -160,7 +169,7 @@ REQUIRED = {t["name"]: t["input_schema"]["required"] for t in TOOLS}
 # Role-based masking by prefix (the tool list itself never changes).
 ROLE_DENY = {
     "main": (),
-    "subagent": ("message_", "agent_", "schedule_"),
+    "subagent": ("message_", "agent_", "schedule_", "knowledge_"),
 }
 
 
@@ -220,6 +229,8 @@ def ui_category(name: str) -> str:
         return "schedule"
     if name.startswith("mcp_"):
         return "mcp"
+    if name.startswith("knowledge_"):
+        return "knowledge"
     return name
 
 
@@ -269,4 +280,6 @@ def describe(name: str, args: dict) -> tuple[str, str]:
         return "Using MCP", args.get("tool", "")
     if name == "schedule_create":
         return "Creating scheduled task", args.get("title", "")
+    if name == "knowledge_save":
+        return "Saving knowledge", args.get("title") or args.get("content", "")[:60]
     return ACTION_LABEL.get(cat, name), ""

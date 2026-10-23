@@ -6,7 +6,7 @@
 
 ## 功能
 - **Agent Loop**：分析事件 → 选择工具 → 沙箱执行 → 观察 → 迭代 → 交付 → idle
-- **31 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`、`info_extract_webpage`、`deploy_expose_port`、`message_*`、`plan_update`、`agent_map_reduce`、`schedule_create`、`idle`
+- **34 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`、`info_extract_webpage`、`deploy_expose_port`、`message_*`、`plan_update`、`agent_map_reduce`、`schedule_create`、`knowledge_save`、`mcp_*`、`idle`
 - **并行工具调用**：一轮里如果全是只读调用（搜索、网页提取、读文件），就并发执行
 - **Planner 模块**：结构化输出生成计划；**Skills**：`backend/skills/<name>/SKILL.md` 装进沙箱，上下文里只放目录，Agent 按需读取
 - **交付语义**：`chat.deliveryKind` 分为 `opening` / `progress` / `result`；任务结束后生成追问建议（`suggestion` 步骤）
@@ -23,6 +23,7 @@
 - **Wide Research 控制**：运行中可停止/重试单个子任务、强制继续；已完成项可在重跑时复用
 - **项目**：项目指令 + 项目文件，项目内的任务自动获得指令并把文件复制到沙箱 `~/project/`
 - **沙箱回收**：空闲（默认 15 分钟）且无人观看、任务不在运行的沙箱自动停止，保留文件，下次使用自动启动
+- **个性化**（"更多 → 个性化"）：昵称、职业、关于你、自定义指令对所有任务生效；"知识"保存长期事实和偏好，可启用/停用；任务中 Agent 用 `knowledge_save` 提议记住某条信息，用户在对话里一键接受或忽略；"从其他 AI 导入记忆"把其他助手的记忆导出解析成资料和知识，确认后再写入
 - **自动化（定时任务）**：仅一次 / 按间隔 / 每天 / 每周，到点自动新建任务运行；可在"自动化"页面管理，也可在对话里让 Agent 用 `schedule_create` 创建
 - **界面**：按 Manus 2.0 网页端还原（用 REA/CDP 实测的布局、设计变量和交互）：可折叠的工作日志与步骤分组、结果文件卡片与预览、追问建议、带时间轴回放的"电脑"面板、计划进度条、浅色/深色主题
 - **实时协议**：WebSocket 上传输 Manus 同构事件（`chat`/`toolUsed`/`planUpdate`/`statusUpdate`），支持断线续传、运行中追加消息、向用户提问、停止后恢复

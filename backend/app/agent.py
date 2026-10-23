@@ -65,6 +65,7 @@ class AgentHost:
     def file_url(self, path: str) -> str: return path
     async def keep_file(self, path: str, kind: str) -> None: ...
     def create_schedule(self, args: dict) -> dict: raise NotImplementedError
+    def propose_knowledge(self, title: str, content: str) -> dict: raise NotImplementedError
     def preview_url(self, port: int) -> str: return ""
     def persist(self) -> None: ...
 
@@ -423,6 +424,16 @@ class Agent:
             return ToolOutcome(f"Scheduled task \"{s['title']}\" created ({s['description']}); next run: {nxt}. "
                                "Each run starts a new task with the prompt. The user can manage it under 自动化.",
                                {"schedule": s})
+
+        # ---- knowledge
+        if name == "knowledge_save":
+            try:
+                k = host.propose_knowledge(a.get("title", ""), a["content"])
+            except ValueError as e:
+                return ToolOutcome(f"Could not save: {e}", is_error=True, detail={"error": str(e)})
+            state = "already remembered" if not k.get("pending") else "proposed to the user, who can accept or dismiss it"
+            return ToolOutcome(f"Knowledge \"{k['title']}\" {state}. It applies to future tasks, not this one.",
+                               {"knowledge": k})
 
         # ---- wide research
         if name == "agent_map_reduce":

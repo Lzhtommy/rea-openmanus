@@ -17,7 +17,7 @@ import logging
 import time
 from pathlib import Path
 
-from . import config, connectors, llm, projects, providers, skills
+from . import config, connectors, llm, personal, projects, providers, skills
 from .agent import Agent, AgentHost, now_ms, render_plan, short_id
 from .sandbox import manager
 
@@ -45,6 +45,7 @@ class Session(AgentHost):
         self.project_announced = False
         self.share: dict | None = None  # {token, createdAt}: public read-only replay link
         self.connectors_note = ""  # last connector summary told to the agent (re-sent when it changes)
+        self.personal_note = ""  # last profile / instructions / knowledge told to the agent (re-sent when it changes)
         self.model_selection: dict = {}  # {mode, provider?, model?} chosen in the UI (Manus' mode selector)
         self.task: asyncio.Task | None = None
         self.subscribers: set[asyncio.Queue] = set()
@@ -65,7 +66,8 @@ class Session(AgentHost):
         (self.dir / "meta.json").write_text(json.dumps({**self.meta(), "envAnnounced": self.env_announced,
                                                         "files": self.files, "share": self.share,
                                                         "mrCache": self.map_reduce_cache,
-                                                        "projectAnnounced": self.project_announced}, ensure_ascii=False))
+                                                        "projectAnnounced": self.project_announced,
+                                                        "personalNote": self.personal_note}, ensure_ascii=False))
         (self.dir / "messages.json").write_text(json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
@@ -81,6 +83,7 @@ class Session(AgentHost):
         s.project_id = meta.get("projectId")
         s.project_announced = meta.get("projectAnnounced", False)
         s.map_reduce_cache = meta.get("mrCache", {})
+        s.personal_note = meta.get("personalNote", "")
         s.status = meta.get("status", "idle")
         if s.status in ("running", "waiting"):
             s.status = "stopped"  # process restarted mid-run
@@ -200,6 +203,9 @@ class Session(AgentHost):
                 "time": a.get("time"), "weekday": a.get("weekday")}
         return scheduler.create(a.get("title", ""), a.get("prompt", ""), spec, source=self.session_id)
 
+    def propose_knowledge(self, title: str, content: str) -> dict:
+        return personal.store.add(title, content, source="agent", session_id=self.session_id, pending=True)
+
     def stored_file(self, path: str) -> tuple[Path, dict] | None:
         meta = self.files.get(path)
         p = self.dir / "files" / meta["stored"] if meta else None
@@ -284,6 +290,10 @@ class Session(AgentHost):
                 paths = await projects.store.install(self.project_id, sandbox)
                 system_notes.append(projects.store.note(self.project_id, paths))
                 self.project_announced = True
+            if personal.store and (note := personal.store.note()) != self.personal_note:
+                system_notes.append(note or "<user_profile>\nThe user cleared their profile, instructions and knowledge; "
+                                    "disregard what was said about them earlier.\n</user_profile>")
+                self.personal_note = note
             if connectors.manager and (summary := connectors.manager.summary()) != self.connectors_note:
                 system_notes.append(summary or "<connectors>\nNo MCP servers are connected now.\n</connectors>")
                 self.connectors_note = summary

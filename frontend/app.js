@@ -57,6 +57,9 @@ const ICONS = {
   folderPlus: '<path d="M12 10v6M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   library: '<path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"/>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  brain: '<path d="M12 5a3 3 0 1 0-6 .1 4 4 0 0 0-2.5 5.9A4 4 0 0 0 6 18a3 3 0 0 0 6 0z"/><path d="M12 5a3 3 0 1 1 6 .1 4 4 0 0 1 2.5 5.9A4 4 0 0 1 18 18a3 3 0 0 1-6 0zM12 5v13"/>',
   paperclip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 0 1 5.7 5.7l-8.6 8.6a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
 };
 const icon = (name, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
@@ -95,10 +98,11 @@ const TOOL = {
   deploy: { icon: "rocket", use: "部署服务" },
   schedule: { icon: "clock", use: "自动化" },
   mcp: { icon: "plug", use: "连接器" },
+  knowledge: { icon: "brain", use: "知识" },
 };
 const ACTION_ZH = {
   "Executing command": "执行命令", "Checking terminal": "查看终端", Browsing: "浏览", Typing: "输入", Clicking: "点击",
-  "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务", "Searching tools": "搜索工具", "Using MCP": "调用工具",
+  "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务", "Searching tools": "搜索工具", "Using MCP": "调用工具", "Saving knowledge": "提议记住",
   Searching: "搜索", "Reading webpage": "提取网页", "Running parallel sub-agents": "并行执行子任务", "Exposing port": "部署预览",
 };
 const zh = (a) => ACTION_ZH[a] || a || "";
@@ -114,6 +118,7 @@ const S = {
   panel: { open: false, userClosed: false, sel: null, file: null, full: false, takeover: false },
   vnc: false, vncFailed: false,
   attachments: [], previews: {},
+  personal: { profile: {}, instructions: "", knowledge: [] }, persTab: "profile", editingKnow: null,
 };
 
 function resetSession() {
@@ -186,6 +191,7 @@ function apply(ev) {
     case "toolUsed": {
       const t = ensureTurn(ev.timestamp);
       if (ev.tool === "suggestion") { t.suggestions = ev.detail?.suggestion?.commands || []; S.dirty.add(t); break; }
+      if (ev.detail?.knowledge && ev.status === "success" && !S.replaying) loadPersonal().then(() => { S.dirty.add(t); scheduleRender(); });
       let i = S.stepIdx[ev.actionId];
       if (i === undefined) {
         i = S.steps.length; S.stepIdx[ev.actionId] = i;
@@ -233,8 +239,10 @@ function scheduleRender(scrollEnd = false) {
 
 function renderAll() {
   const auto = S.view === "automations", conn = S.view === "connectors";
-  const proj = S.view === "project";
-  const lib = S.view === "library" || auto || conn || proj; // full-page views without a composer dock
+  const proj = S.view === "project", pers = S.view === "personal";
+  const lib = S.view === "library" || auto || conn || proj || pers; // full-page views without a composer dock
+  $("#personal").classList.toggle("hidden", !pers);
+  $("#nav-more").classList.toggle("active", pers);
   $("#project-view").classList.toggle("hidden", !proj);
   const home = !S.current && !lib;
   $("#home").classList.toggle("hidden", !home);
@@ -247,7 +255,8 @@ function renderAll() {
   $("#dock").classList.toggle("hidden", home || lib);
   $("#nav-library").classList.toggle("active", S.view === "library");
   (proj ? $("#proj-slot") : home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  $("#composer").classList.toggle("hidden", pers);
+  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   renderModeButton();
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
@@ -256,6 +265,7 @@ function renderAll() {
   if (auto) { renderAutomations(); renderPanel(); return; }
   if (conn) { renderConnectors(); renderPanel(); return; }
   if (proj) { renderProject(); renderPanel(); return; }
+  if (pers) { renderPersonal(); renderPanel(); return; }
   if (lib) { renderLibrary(); renderPanel(); return; }
   if (home) { renderPanel(); return; }
 
@@ -310,6 +320,7 @@ function renderTurn(t) {
     }
     if (running && isLast && S.status !== "waiting") h += liveLineHtml(t);
     h += pendingConfirms(t).map(confirmHtml).join("");
+    h += S.steps.filter((s) => s.turn === t && s.detail?.knowledge && s.status === "success").map((s) => knowCardHtml(s.detail.knowledge)).join("");
     if (finalItems.length) h += `<div class="final">${finalItems.map((it) => (it.kind === "chat" ? chatHtml(it.ev, true) : itemHtml(t, it, false))).join("")}</div>`;
     if (isFinished(t)) h += doneRowHtml(t, fi);
     if (t.suggestions?.length && isLast) h += `<div class="suggestions">${t.suggestions.map((c, i) =>
@@ -380,6 +391,7 @@ function summarize(steps) {
     else if (n.startsWith("schedule_")) c.sched = (c.sched || 0) + 1;
     else if (n === "mcp_search_tools") c.ts = (c.ts || 0) + 1;
     else if (n === "mcp_call_tool") c.tc = (c.tc || 0) + 1;
+    else if (n === "knowledge_save") c.kn = (c.kn || 0) + 1;
   }
   const parts = [];
   if (c.q) parts.push(`已搜索 ${c.q} 个查询`);
@@ -395,6 +407,7 @@ function summarize(steps) {
   if (c.sched) parts.push(`创建了 ${c.sched} 个定时任务`);
   if (c.ts) parts.push(`搜索了 ${c.ts} 次工具`);
   if (c.tc) parts.push(`调用了 ${c.tc} 次连接器工具`);
+  if (c.kn) parts.push(`提议记住 ${c.kn} 条知识`);
   return parts.join(" · ") || `执行了 ${steps.length} 个步骤`;
 }
 
@@ -405,6 +418,18 @@ function confirmHtml(s) {
     `<div class="cc-body"><div class="cc-reason">${esc(s.brief || zh(s.message?.action))}<span>${esc(c.reason || "")}</span></div>${detail}</div>` +
     `<div class="cc-actions"><button class="btn ghost" data-act="confirm" data-id="${esc(s.actionId)}" data-ok="0" ${s._answered ? "disabled" : ""}>拒绝</button>` +
     `<button class="btn primary" data-act="confirm" data-id="${esc(s.actionId)}" data-ok="1" ${s._answered ? "disabled" : ""}>允许执行</button></div></div>`;
+}
+
+// Knowledge the agent proposed in this turn (knowledge_save): the user accepts or dismisses it in place.
+function knowCardHtml(k) {
+  const cur = S.personal.knowledge.find((x) => x.id === k.id);
+  const state = !cur ? "dismissed" : cur.pending ? "pending" : "saved";
+  if (state === "dismissed" && !k._seen) return "";
+  const actions = S.readonly ? "" : state === "pending"
+    ? `<button class="btn ghost sm" data-act="know" data-id="${esc(k.id)}" data-op="dismiss">忽略</button><button class="btn primary sm" data-act="know" data-id="${esc(k.id)}" data-op="accept">记住</button>`
+    : `<span class="muted">${state === "saved" ? "已保存到知识" : "已忽略"}</span><button class="btn ghost sm" data-act="know" data-op="manage">管理</button>`;
+  return `<div class="know-card"><span class="auto-ico">${icon("brain")}</span><div class="auto-main"><div class="auto-title">${state === "pending" ? "OpenManus 想记住这条信息" : esc(k.title)}</div>` +
+    `<div class="auto-when">${state === "pending" ? `<b>${esc(k.title)}</b>：` : ""}${esc(k.content)}</div></div><div class="know-actions">${actions}</div></div>`;
 }
 
 function liveLineHtml(t) {
@@ -585,6 +610,7 @@ function stepView(s) {
   }
   if (d.mcp) return `<div class="file-head">${icon("plug")}<span class="grow">${esc(d.mcp.server)} · ${esc(d.mcp.action)}</span></div>` +
     `<div class="page-md"><div class="mcp-label">参数</div><pre class="cc-cmd">${esc(d.mcp.argumentsPreview)}</pre><div class="mcp-label">结果</div><pre class="cc-cmd mcp-out">${esc(d.mcp.resultPreview)}</pre></div>`;
+  if (d.knowledge) return `<div class="mr">${knowCardHtml(d.knowledge)}</div>`;
   if (d.schedule) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${autoCardHtml(d.schedule, false)}</div></div>`;
   if (d.deploy) return `<div class="urlbar">${icon("globe")}<a href="${esc(d.deploy.url)}" target="_blank">${esc(d.deploy.url)}</a></div><iframe class="preview-frame" style="height:calc(100% - 37px)" src="${esc(d.deploy.url)}"></iframe>`;
   if (d.error) return `<div class="err-view"><div class="term">${esc(d.error)}</div></div>`;
@@ -976,6 +1002,119 @@ function openViewer(f) {
 }
 function closeViewer() { $("#viewer").classList.add("hidden"); S.viewing = null; }
 
+// ------------------------------------------------------------------ personalization (个性化) ---
+async function loadPersonal() {
+  try { S.personal = await (await fetch("/api/personalization")).json(); } catch { /* keep */ }
+}
+async function openPersonal(tab) {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "personal"; S.persTab = tab || S.persTab;
+  history.replaceState(null, "", "#personal");
+  renderSessions();
+  await loadPersonal();
+  fillProfile();
+  scheduleRender();
+}
+function fillProfile() {
+  const f = $("#pers-profile");
+  ["nickname", "occupation", "about"].forEach((k) => (f[k].value = S.personal.profile?.[k] || ""));
+  f.instructions.value = S.personal.instructions || "";
+  syncCounts();
+}
+function syncCounts() { const f = $("#pers-profile"); f.querySelectorAll("[data-count]").forEach((n) => (n.textContent = `${f[n.dataset.count].value.length} / ${f[n.dataset.count].maxLength}`)); }
+function renderPersonal() {
+  document.querySelectorAll("#pers-tabs [data-ptab]").forEach((b) => b.classList.toggle("on", b.dataset.ptab === S.persTab));
+  $("#pers-profile").classList.toggle("hidden", S.persTab !== "profile");
+  $("#pers-knowledge").classList.toggle("hidden", S.persTab !== "knowledge");
+  const pend = S.personal.knowledge.filter((k) => k.pending).length;
+  $("#pers-tabs [data-ptab=knowledge]").innerHTML = `知识${S.personal.knowledge.length ? `<span>${S.personal.knowledge.length}</span>` : ""}${pend ? `<i class="dot"></i>` : ""}`;
+  if (S.persTab !== "knowledge") return;
+  const row = (k) => `<div class="auto-card ${k.enabled && !k.pending ? "" : "off"}"><div class="auto-top"><span class="auto-ico">${icon("brain")}</span><div class="auto-main">` +
+    `<div class="auto-title">${esc(k.title)}${k.pending ? '<span class="lib-tag">待确认</span>' : ""}${k.source === "agent" ? '<span class="lib-tag">任务中提议</span>' : k.source === "import" ? '<span class="lib-tag">导入</span>' : ""}</div>` +
+    `<div class="auto-when">${esc(k.content)}</div></div>` +
+    (k.pending ? `<button class="btn ghost sm" data-know="dismiss" data-id="${esc(k.id)}">忽略</button><button class="btn primary sm" data-know="accept" data-id="${esc(k.id)}">记住</button>`
+      : `<button class="switch ${k.enabled ? "on" : ""}" data-know="toggle" data-id="${esc(k.id)}" title="${k.enabled ? "停用" : "启用"}"><i></i></button>`) + `</div>` +
+    `<div class="auto-foot"><div class="auto-runs">${k.sessionId ? `<a href="#${esc(k.sessionId)}" data-goto="${esc(k.sessionId)}">${icon("message")}来源任务</a>` : ""}<span>${fmtDate(k.createdAt)}</span></div>` +
+    `<button class="icon-btn sm" data-know="edit" data-id="${esc(k.id)}" title="编辑">${icon("pencil")}</button><button class="icon-btn sm" data-know="del" data-id="${esc(k.id)}" title="删除">${icon("trash")}</button></div></div>`;
+  const list = S.personal.knowledge;
+  $("#know-list").innerHTML = list.length ? [...list.filter((k) => k.pending), ...list.filter((k) => !k.pending)].map(row).join("")
+    : `<div class="lib-empty">${icon("brain")}<div>还没有知识</div><div class="muted">添加你希望 OpenManus 长期记住的事实和偏好</div></div>`;
+}
+async function knowAction(op, id) {
+  const k = S.personal.knowledge.find((x) => x.id === id);
+  if (op === "manage") return openPersonal("knowledge");
+  if (op === "edit") return openKnowForm(k);
+  if (op === "accept") await fetch(`/api/knowledge/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accept: true }) });
+  if (op === "toggle") await fetch(`/api/knowledge/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !k.enabled }) });
+  if (op === "dismiss" || op === "del") {
+    if (op === "del" && !confirm(`删除知识「${k?.title}」？`)) return;
+    await fetch(`/api/knowledge/${id}`, { method: "DELETE" });
+  }
+  await loadPersonal();
+  S.steps.forEach((s) => { if (s.detail?.knowledge?.id === id) s.detail.knowledge._seen = true; });
+  S.turns.forEach((t) => S.dirty.add(t)); scheduleRender();
+}
+function openKnowForm(k) {
+  S.editingKnow = k || null;
+  const f = $("#know-form"); f.reset();
+  $("#know-form-title").textContent = k ? "编辑知识" : "添加知识"; $("#know-err").textContent = "";
+  if (k) { f.title.value = k.title; f.content.value = k.content; }
+  $("#know-modal").classList.remove("hidden"); f.content.focus();
+}
+async function saveKnow(e) {
+  e.preventDefault();
+  const f = e.target, body = { title: f.title.value, content: f.content.value };
+  const r = await fetch(S.editingKnow ? `/api/knowledge/${S.editingKnow.id}` : "/api/knowledge",
+    { method: S.editingKnow ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) { $("#know-err").textContent = (await r.json().catch(() => ({}))).detail || "保存失败"; return; }
+  $("#know-modal").classList.add("hidden");
+  await loadPersonal(); scheduleRender();
+}
+async function saveProfile(e) {
+  e.preventDefault();
+  const f = e.target;
+  const body = { profile: { nickname: f.nickname.value, occupation: f.occupation.value, about: f.about.value }, instructions: f.instructions.value };
+  const r = await fetch("/api/personalization", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (r.ok) { S.personal = await r.json(); $("#pers-saved").textContent = "已保存"; setTimeout(() => ($("#pers-saved").textContent = ""), 1800); renderMe(); }
+}
+// Import another assistant's memory: the model extracts a profile and knowledge items; the user reviews them first.
+async function runImport() {
+  const btn = $("#import-run");
+  if (S.importDraft) return applyImport();
+  $("#import-err").textContent = "";
+  btn.disabled = true; btn.textContent = "解析中…";
+  const r = await fetch("/api/personalization/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: $("#import-text").value }) });
+  btn.disabled = false; btn.textContent = "解析";
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("#import-err").textContent = j.detail || "解析失败"; return; }
+  S.importDraft = j;
+  const prof = [["昵称", j.nickname], ["职业", j.occupation], ["关于你", j.about]].filter(([, v]) => v);
+  $("#import-result").innerHTML = `<div class="import-review"><div class="mcp-label">将填入个人资料（只覆盖空白项）</div>${prof.map(([k, v]) => `<div><b>${k}</b>：${esc(v)}</div>`).join("") || '<div class="muted">没有识别到个人资料</div>'}` +
+    `<div class="mcp-label">将添加 ${j.knowledge.length} 条知识</div>${j.knowledge.map((k, i) => `<label class="check"><input type="checkbox" data-imp="${i}" checked />${esc(k.title)}：${esc(k.content)}</label>`).join("")}</div>`;
+  btn.textContent = "导入";
+}
+async function applyImport() {
+  const j = S.importDraft, cur = S.personal.profile || {};
+  const profile = {};
+  if (j.nickname && !cur.nickname) profile.nickname = j.nickname;
+  if (j.occupation && !cur.occupation) profile.occupation = j.occupation;
+  if (j.about && !cur.about) profile.about = j.about;
+  if (Object.keys(profile).length) await fetch("/api/personalization", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile }) });
+  for (const n of document.querySelectorAll("[data-imp]:checked")) {
+    const k = j.knowledge[+n.dataset.imp];
+    await fetch("/api/knowledge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...k, source: "import" }) });
+  }
+  closeImport();
+  await openPersonal(Object.keys(profile).length ? "profile" : "knowledge");
+  renderMe();
+}
+function closeImport() { $("#import-modal").classList.add("hidden"); S.importDraft = null; $("#import-result").innerHTML = ""; $("#import-text").value = ""; $("#import-run").textContent = "解析"; }
+function renderMe() {
+  const nick = S.personal.profile?.nickname;
+  $(".me-name").textContent = nick || "OpenManus";
+  $(".me .avatar").textContent = (nick || "O").slice(0, 1).toUpperCase();
+}
+
 // ------------------------------------------------------------------ automations (自动化) ---
 const fmtTs = (sec) => (sec ? new Date(sec * 1000).toLocaleString("zh-CN", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" }) : "—");
 
@@ -1178,6 +1317,24 @@ function bind() {
     if (currentSel().provider === pid) setSel(defaultSel());
   };
   $("#nav-auto").onclick = openAutomations;
+  $("#nav-more").onclick = (e) => { e.stopPropagation(); $("#more-menu").classList.toggle("hidden"); };
+  $("#more-menu").onclick = (e) => { const b = e.target.closest("[data-goto-view]"); if (!b) return; $("#more-menu").classList.add("hidden"); if (b.dataset.gotoView === "personal") openPersonal(); };
+  document.addEventListener("click", (e) => { if (!e.target.closest(".more-wrap")) $("#more-menu").classList.add("hidden"); });
+  $("#pers-tabs").onclick = (e) => { const b = e.target.closest("[data-ptab]"); if (b) { S.persTab = b.dataset.ptab; renderPersonal(); } };
+  $("#pers-profile").onsubmit = saveProfile;
+  $("#pers-profile").oninput = syncCounts;
+  $("#know-new").onclick = () => openKnowForm(null);
+  $("#know-list").onclick = (e) => {
+    const g = e.target.closest("[data-goto]"); if (g) { e.preventDefault(); openSession(g.dataset.goto); return; }
+    const b = e.target.closest("[data-know]"); if (b) knowAction(b.dataset.know, b.dataset.id);
+  };
+  $("#know-form").onsubmit = saveKnow;
+  $("#know-close").onclick = $("#know-cancel").onclick = () => $("#know-modal").classList.add("hidden");
+  $("#import-open").onclick = () => { closeImport(); $("#import-modal").classList.remove("hidden"); $("#import-text").focus(); };
+  $("#import-close").onclick = $("#import-cancel").onclick = closeImport;
+  $("#import-run").onclick = runImport;
+  $("#import-text").oninput = () => { if (S.importDraft) { S.importDraft = null; $("#import-result").innerHTML = ""; $("#import-run").textContent = "解析"; } };
+  $("#import-copy").onclick = async () => { try { await navigator.clipboard.writeText($("#import-prompt").value); $("#import-copy").textContent = "已复制"; } catch { $("#import-prompt").select(); } };
   $("#auto-new").onclick = () => openSchedForm(null);
   $("#auto-list").onclick = (e) => {
     const g = e.target.closest("[data-goto]");
@@ -1252,6 +1409,7 @@ function bind() {
       case "open-file": if (e.target.closest("a[download]")) return; S.panel.open = true; S.panel.userClosed = false; S.panel.file = { url: a.dataset.url, name: a.dataset.name, path: a.dataset.path }; refreshSel(); break;
       case "plan": e.stopPropagation(); S.planOpen = !S.planOpen; renderTaskbar(); return;
       case "takeover": if (!S.readonly) toggleTakeover(); break;
+      case "know": if (!S.readonly) knowAction(a.dataset.op, a.dataset.id); break;
       case "mr": {
         if (S.readonly) break;
         const msg = { type: "map_reduce_control", sessionId: S.current, actionId: a.dataset.id, op: a.dataset.op };
@@ -1307,6 +1465,7 @@ async function deleteSession(sid) {
     S.cfg = await (await fetch("/api/config")).json();
     await loadModels();
     await loadProjects();
+    await loadPersonal(); renderMe();
     $("#config-info").textContent = `${shortModel(S.cfg.model)} · ${S.cfg.sandbox} 沙箱`;
   } catch { /* backend not reachable yet */ }
   await refreshSessions();
@@ -1315,6 +1474,7 @@ async function deleteSession(sid) {
   if (sid === "library") openLibrary();
   else if (sid === "automations") openAutomations();
   else if (sid === "connectors") openConnectors();
+  else if (sid === "personal") openPersonal();
   else if (sid.startsWith("project/")) openProject(sid.slice(8));
   else openSession(sid && S.sessions.some((s) => s.id === sid) ? sid : null);
   autoGrow();

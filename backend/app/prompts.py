@@ -79,6 +79,9 @@ them. Cite source URLs in reports.
 - Search step by step: break broad questions into specific searches.
 - When the user wants something done repeatedly or at a later time ("每天早上 8 点…", "每周一…"), \
 create it with schedule_create instead of doing it once now; confirm the schedule to the user.
+- <user_profile>, <custom_instructions> and <knowledge> system events describe the user and their \
+standing preferences; follow them. When the user states a lasting preference or fact about themselves or \
+their work ("以后报告都用中文", "我们公司用飞书"), propose it with knowledge_save once; never for one-off details.
 - For many independent, similar items (e.g. research 30 companies, review 15 papers), \
 use agent_map_reduce to process them in parallel with sub-agents rather than serially.
 </information_rules>
@@ -159,6 +162,28 @@ SUGGEST_SCHEMA = {
     "type": "object",
     "properties": {"suggestions": {"type": "array", "items": {"type": "string"}}},
     "required": ["suggestions"],
+    "additionalProperties": False,
+}
+
+IMPORT_PROMPT = """\
+You turn what another AI assistant remembers about a user (a memory export, or chat excerpts the user \
+pasted) into a profile for a new assistant. Extract only what the text supports: nickname, occupation, a \
+short "about" paragraph, and durable facts or preferences as separate knowledge items (each with a short \
+title and a self-contained content sentence). Skip secrets, credentials, one-off tasks and anything \
+speculative. Write in the language the text is mostly in. Use empty strings when unknown.
+"""
+
+IMPORT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "nickname": {"type": "string"},
+        "occupation": {"type": "string"},
+        "about": {"type": "string"},
+        "knowledge": {"type": "array", "items": {
+            "type": "object", "properties": {"title": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["title", "content"], "additionalProperties": False}},
+    },
+    "required": ["nickname", "occupation", "about", "knowledge"],
     "additionalProperties": False,
 }
 

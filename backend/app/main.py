@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, connectors, llm, projects, providers, scheduler as scheduler_mod, session as session_mod
+from . import config, connectors, llm, personal, projects, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -37,6 +37,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 async def lifespan(app: FastAPI):
     session_mod.store = session_mod.SessionStore()
     projects.store = projects.Projects()
+    personal.store = personal.Personal()
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
     def busy(sid: str) -> bool:
@@ -203,6 +204,51 @@ async def delete_project_file(pid: str, name: str):
     _project(pid)
     projects.store.remove_file(pid, name)
     return projects.store.view(projects.store.items[pid])
+
+
+# ------------------------------------------------------------- personalization (个性化) ---
+
+@app.get("/api/personalization")
+async def get_personal():
+    return personal.store.view()
+
+
+@app.put("/api/personalization")
+async def put_personal(body: dict):
+    return personal.store.update(body)
+
+
+@app.post("/api/personalization/import")
+async def import_memory(body: dict):
+    """Another assistant's memory export -> a proposed profile and knowledge items (saved by the client)."""
+    text = str(body.get("text") or "").strip()
+    if len(text) < 10:
+        raise HTTPException(400, "请粘贴从其他 AI 导出的记忆内容")
+    r = await llm.import_memory(text)
+    if not r:
+        raise HTTPException(502, "解析失败，请稍后重试")
+    return r
+
+
+@app.post("/api/knowledge")
+async def add_knowledge(body: dict):
+    try:
+        return personal.store.add(body.get("title", ""), body.get("content", ""), source=body.get("source") or "user")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/api/knowledge/{kid}")
+async def edit_knowledge(kid: str, body: dict):
+    if kid not in personal.store.knowledge:
+        raise HTTPException(404, "knowledge not found")
+    return personal.store.edit(kid, body)
+
+
+@app.delete("/api/knowledge/{kid}")
+async def delete_knowledge(kid: str):
+    personal.store.remove(kid)
+    return {"ok": True}
 
 
 # ------------------------------------------------------------- share (read-only replay) ---

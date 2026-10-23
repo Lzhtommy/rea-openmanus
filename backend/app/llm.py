@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from . import config, providers
 from .providers import Profile
-from .prompts import PLANNER_PROMPT, PLANNER_SCHEMA, SUGGEST_PROMPT, SUGGEST_SCHEMA, SYSTEM_PROMPT
+from .prompts import IMPORT_PROMPT, IMPORT_SCHEMA, PLANNER_PROMPT, PLANNER_SCHEMA, SUGGEST_PROMPT, SUGGEST_SCHEMA, SYSTEM_PROMPT
 from .tools import TOOLS
 
 log = logging.getLogger("manus.llm")
@@ -367,3 +367,9 @@ async def suggest(request: str, reply: str, profile: Profile | None = None) -> l
     r = await _structured("suggest", SUGGEST_PROMPT, SUGGEST_SCHEMA,
                           f"<user_request>\n{request}\n</user_request>\n\n<agent_reply>\n{reply[:6000]}\n</agent_reply>", profile)
     return [x for x in (r or {}).get("suggestions", []) if isinstance(x, str) and x.strip()][:3]
+
+
+async def import_memory(text: str, profile: Profile | None = None) -> dict | None:
+    """Profile + knowledge items extracted from another assistant's memory export."""
+    return await _structured("import_memory", IMPORT_PROMPT, IMPORT_SCHEMA,
+                             f"<memory_export>\n{text[:30000]}\n</memory_export>", profile)

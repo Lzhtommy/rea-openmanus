@@ -518,3 +518,25 @@ body.share-mode .mode-btn { pointer-events: none; }
   #thread { padding: 8px 16px 24px; }
   .greeting { font-size: 26px; line-height: 34px; }
 }
+
+/* ---- more menu, personalization (个性化) */
+.more-wrap { position: relative; }
+.more-menu { position: absolute; left: 0; top: 38px; z-index: 40; width: 200px; padding: 6px; background: var(--bg-white); border: 1px solid var(--border-main); border-radius: 14px; box-shadow: 0 12px 40px var(--shadow-m); }
+.more-menu .mode-item { width: 100%; font-size: 14px; color: var(--text-primary); }
+#pers-profile { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
+#pers-profile label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); position: relative; }
+#pers-profile input, #pers-profile textarea { font: 14px/21px var(--font); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border-dark); background: var(--bg-white); color: var(--text-primary); outline: none; resize: vertical; }
+#pers-profile input:focus, #pers-profile textarea:focus { border-color: var(--border-input-active); }
+#pers-profile .count { position: absolute; right: 10px; bottom: 8px; font-size: 12px; color: var(--text-quaternary); }
+.muted.small { font-size: 12px; margin-top: -8px; }
+.import-card, .know-card { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-white); }
+.know-card { margin: 10px 0; }
+.know-card .auto-when b { color: var(--text-primary); font-weight: 500; }
+.know-actions { display: flex; align-items: center; gap: 8px; flex: none; font-size: 13px; }
+.lib-tab i.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--function-error, #f25a5a); }
+.import-modal { width: min(560px, calc(100vw - 32px)); }
+.import-review { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-primary); max-height: 260px; overflow: auto; }
+.import-review .mcp-label { margin-top: 6px; }
+#personal { flex: 1; min-height: 0; overflow-y: auto; }
+#know-modal, #import-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+#know-modal.hidden, #import-modal.hidden { display: none; }
