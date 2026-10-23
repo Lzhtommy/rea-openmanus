@@ -1051,6 +1051,8 @@ def test_multi_user(monkeypatch, tmp_path):
     from app import main
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(manager, "sandboxes", {})  # earlier tests' clients belong to other event loops
+    monkeypatch.setattr(manager, "local_procs", {})
     with TestClient(main.app) as c:
         old = c.post("/api/sessions", json={}).json()["id"]  # single-user mode: no sign-in needed
         assert c.get("/api/auth/me").json() == {"enabled": False, "setup": True, "feishu": False, "user": None}
