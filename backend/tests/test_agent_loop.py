@@ -1132,3 +1132,30 @@ async def test_mail_manus(store, monkeypatch):
             break
         await asyncio.sleep(0.1)
     assert sent and sent[0][0] == "li@example.com" and "共 2 行" in sent[0][2]
+
+
+@pytest.mark.asyncio
+async def test_feishu_bot(store, monkeypatch):
+    """A Feishu message to the bot starts a task and the result is replied in the chat."""
+    import json as _json
+    from app import feishu_bot
+    sent = []
+
+    async def fake_reply(mid, text):
+        sent.append((mid, text))
+    monkeypatch.setattr(feishu_bot, "reply", fake_reply)
+    assert await feishu_bot.handle({"type": "url_verification", "challenge": "abc"}, store) == {"challenge": "abc"}
+    model = ScriptedModel([msg(tool("message_notify_user", text="明天晴", kind="result")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    ev = {"header": {"event_type": "im.message.receive_v1", "event_id": "e1"},
+          "event": {"sender": {"sender_id": {"open_id": "ou_1"}},
+                    "message": {"message_id": "om_1", "message_type": "text", "content": _json.dumps({"text": "@_user_1 明天天气"})}}}
+    r = await feishu_bot.handle(ev, store)
+    assert (await feishu_bot.handle(ev, store)) == {"ok": True}  # retried delivery is ignored
+    s = store.get(r["sessionId"])
+    await wait_status(s, {"idle"})
+    for _ in range(100):
+        if sent:
+            break
+        await asyncio.sleep(0.1)
+    assert s.messages[0]["content"][0]["text"].startswith("明天天气") and sent[0][0] == "om_1" and "明天晴" in sent[0][1]

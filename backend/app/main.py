@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import agents, apikeys, auth, computers, mail, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import agents, apikeys, auth, computers, feishu_bot, mail, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -82,7 +82,7 @@ app = FastAPI(title="Manus-like agent platform", lifespan=lifespan)
 
 # Paths that work without signing in: sign-in itself, public share replays, incoming webhooks (secret URL),
 # the device connector (device token) and its downloads.
-OPEN_PATHS = ("/api/v1/", "/api/auth/", "/api/share/", "/api/hooks/", "/api/devices/connect", "/api/devices/agent.py", "/api/devices/server.py",
+OPEN_PATHS = ("/api/integrations/", "/api/v1/", "/api/auth/", "/api/share/", "/api/hooks/", "/api/devices/connect", "/api/devices/agent.py", "/api/devices/server.py",
               "/api/config")
 
 
@@ -1404,6 +1404,14 @@ async def api_task_message(sid: str, body: dict, request: Request):
     s = _session(sid)
     await s.user_message(str(body.get("content") or ""), [])
     return _task_view(s)
+
+
+@app.post("/api/integrations/feishu/events")
+async def feishu_events(body: dict):
+    """Feishu event subscription: url verification, and messages to the bot become tasks."""
+    if body.get("encrypt"):
+        raise HTTPException(400, "turn off event encryption for this app (or leave the Encrypt Key empty)")
+    return await feishu_bot.handle(body, session_mod.store)
 
 
 @app.get("/api/library")
