@@ -543,6 +543,16 @@ class Agent:
             except Exception as e:  # noqa: BLE001 — not configured, auth or network errors go back to the model
                 return ToolOutcome(f"Email failed: {e}", is_error=True, detail={"error": str(e)})
 
+        # ---- phone
+        if name in ("phone_sms", "phone_call"):
+            from . import phone
+            try:
+                sid = await (phone.sms(a["to"], a["text"]) if name == "phone_sms" else phone.call(a["to"], a["message"]))
+            except Exception as e:  # noqa: BLE001
+                return ToolOutcome(f"Phone action failed: {e}", is_error=True, detail={"error": str(e)})
+            return ToolOutcome(f"{'Text sent' if name == 'phone_sms' else 'Call placed'} to {a['to']} ({sid}).",
+                               {"phone": {"action": name.removeprefix("phone_"), "to": a["to"], "sid": sid}})
+
         # ---- knowledge
         if name == "knowledge_save":
             try:
@@ -764,6 +774,10 @@ def _confirm_preview(name: str, args: dict) -> str:
         return f"{args.get('path')}  →  「{args.get('title', '')}」"
     if name == "mcp_call_tool":
         return json.dumps(args.get("arguments") or {}, ensure_ascii=False, indent=1)
+    if name in ("phone_sms", "phone_call"):
+        return f"{args.get('to')}\n\n{args.get('text') or args.get('message')}"
+    if name == "email_send":
+        return f"To: {args.get('to')}\nSubject: {args.get('subject')}\n\n{str(args.get('body', ''))[:1500]}"
     if name == "file_write":
         return f"{args.get('file')}\n\n{str(args.get('content', ''))[:1500]}"
     if name == "file_str_replace":

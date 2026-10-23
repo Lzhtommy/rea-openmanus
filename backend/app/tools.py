@@ -205,6 +205,11 @@ _TOOLS = [
        {"to": S, "subject": S, "body": S, "attachments": ATTACH}, ["to", "subject", "body"]),
     _t("email_check", "Read recent emails in your mailbox (newest first), optionally filtered by a keyword.",
        {"query": S, "limit": I}),
+    # ---- the agent's phone number (Manus' 电话)
+    _t("phone_sms", "Send a text message from your phone number (E.164, e.g. +8613800000000). Needs the user's approval.",
+       {"to": S, "text": S}, ["to", "text"]),
+    _t("phone_call", "Call a phone number and speak a message. Needs the user's approval.",
+       {"to": S, "message": S}, ["to", "message"]),
     # ---- knowledge (long-term memory across tasks)
     _t("knowledge_save",
        "Propose a durable fact or preference to remember for future tasks (e.g. the user's preferred report "
@@ -229,7 +234,7 @@ REQUIRED = {t["name"]: t["input_schema"]["required"] for t in TOOLS}
 # Role-based masking by prefix (the tool list itself never changes).
 ROLE_DENY = {
     "main": (),
-    "subagent": ("message_", "agent_", "schedule_", "knowledge_", "trigger_", "email_send"),
+    "subagent": ("message_", "agent_", "schedule_", "knowledge_", "trigger_", "email_send", "phone_"),
     # condition checks for triggers: observe only, nothing outward-facing or long-lived
     "watcher": ("message_", "agent_", "schedule_", "knowledge_", "trigger_", "deploy_", "mcp_call", "plan_"),
 }
@@ -256,6 +261,10 @@ def needs_confirm(name: str, args: dict) -> str | None:
         return "发布到固定网址，任何拿到链接的人都能访问"
     if name == "email_send":
         return "从 OpenManus 邮箱发送邮件"
+    if name == "phone_sms":
+        return "用 OpenManus 的号码发送短信"
+    if name == "phone_call":
+        return "用 OpenManus 的号码拨打电话"
     if name in ("shell_exec", "shell_write_to_process"):
         text = args.get("command") or args.get("input") or ""
         for pattern, reason in _RISKY_SHELL:
@@ -311,6 +320,8 @@ def ui_category(name: str) -> str:
         return "knowledge"
     if name.startswith("email_"):
         return "gmail"
+    if name.startswith("phone_"):
+        return "phone"
     if name.startswith("slides_"):
         return "slides"
     if name.startswith("media_"):
@@ -384,6 +395,8 @@ def describe(name: str, args: dict) -> tuple[str, str]:
         return "Generating video", args.get("output_path", "")
     if name == "email_send":
         return "Sending email", args.get("to", "")
+    if name.startswith("phone_"):
+        return "Calling" if name == "phone_call" else "Texting", args.get("to", "")
     if name == "email_check":
         return "Checking email", args.get("query", "")
     if name == "knowledge_save":

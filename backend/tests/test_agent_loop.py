@@ -1184,3 +1184,28 @@ async def test_agent_mailbox(store, monkeypatch):
     assert sent == [("boss@x.com", "周报", ["r.md"])]
     chk = next(e for e in s.events if e.get("name") == "email_check" and e["status"] == "success")
     assert chk["detail"]["mail"]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_phone(store, monkeypatch):
+    """Texts and calls go through Twilio only after approval; the call speaks the message as TwiML."""
+    from app import phone
+    posted = []
+
+    async def fake_post(path, data):
+        posted.append((path, data))
+        return {"sid": "SM1"}
+    monkeypatch.setattr(phone, "_post", fake_post)
+    model = ScriptedModel([msg(tool("phone_call", to="+8613800000000", message="会议改到三点 <请确认>")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("打电话通知", [])
+    for _ in range(200):
+        if s.pending_confirms:
+            break
+        await asyncio.sleep(0.05)
+    held = next(e for e in s.events if e.get("status") == "need_confirm")
+    assert not posted and "+8613800000000" in held["confirm"]["command"]
+    s.resolve_confirm(next(iter(s.pending_confirms)), True)
+    await wait_status(s, {"idle"})
+    assert posted[0][0] == "Calls" and 'language="zh-CN"' in posted[0][1]["Twiml"] and "&lt;请确认&gt;" in posted[0][1]["Twiml"]
