@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, connectors, llm, personal, projects, providers, scheduler as scheduler_mod, session as session_mod
+from . import config, connectors, llm, personal, projects, skills, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI):
     session_mod.store = session_mod.SessionStore()
     projects.store = projects.Projects()
     personal.store = personal.Personal()
+    skills.store = skills.Skills()
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
     def busy(sid: str) -> bool:
@@ -204,6 +205,76 @@ async def delete_project_file(pid: str, name: str):
     _project(pid)
     projects.store.remove_file(pid, name)
     return projects.store.view(projects.store.items[pid])
+
+
+# ------------------------------------------------------------- skills (技能) ---
+
+def _skill_call(fn, *a):
+    try:
+        return fn(*a)
+    except KeyError:
+        raise HTTPException(404, "skill not found")
+    except skills.SkillError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/skills")
+async def list_skills():
+    return skills.store.list()
+
+
+@app.get("/api/skills/{name}")
+async def get_skill(name: str):
+    return _skill_call(lambda: skills.store.view(skills.store.get(name), full=True))
+
+
+@app.post("/api/skills")
+async def create_skill(body: dict):
+    return _skill_call(skills.store.create, body)
+
+
+@app.put("/api/skills/{name}")
+async def update_skill(name: str, body: dict):
+    return _skill_call(skills.store.update, name, str(body.get("content") or ""))
+
+
+@app.patch("/api/skills/{name}")
+async def toggle_skill(name: str, body: dict):
+    return _skill_call(skills.store.set_enabled, name, bool(body.get("enabled")))
+
+
+@app.delete("/api/skills/{name}")
+async def delete_skill(name: str):
+    _skill_call(skills.store.delete, name)
+    return {"ok": True}
+
+
+@app.post("/api/skills/upload")
+async def upload_skill(file: UploadFile = File(...)):
+    return _skill_call(skills.store.from_upload, file.filename or "", await file.read())
+
+
+@app.post("/api/skills/import")
+async def import_skill(body: dict):
+    try:
+        return await skills.store.from_github(str(body.get("url") or ""))
+    except skills.SkillError as e:
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"无法访问 GitHub：{e}")
+
+
+@app.post("/api/skills/from-session")
+async def skill_from_session(body: dict):
+    """Add a skill the agent wrote during a task (the directory of the given SKILL.md in its sandbox)."""
+    s = _session(str(body.get("sessionId")))
+    path = str(body.get("path") or "")
+    if not path.endswith("/SKILL.md"):
+        raise HTTPException(400, "请选择 SKILL.md 文件")
+    try:
+        return await skills.store.from_sandbox(await manager.get(s.session_id), path)
+    except skills.SkillError as e:
+        raise HTTPException(400, str(e))
 
 
 # ------------------------------------------------------------- personalization (个性化) ---
@@ -530,7 +601,7 @@ async def ws(websocket: WebSocket):
                 text = (msg.get("content") or "").strip()
                 s.select_model(msg.get("model"))
                 if text:
-                    await s.user_message(text, msg.get("attachments") or [])
+                    await s.user_message(text, msg.get("attachments") or [], msg.get("skills") or [])
             elif kind == "stop_session":
                 await s.stop()
             elif kind == "map_reduce_control":

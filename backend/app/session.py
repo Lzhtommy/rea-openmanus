@@ -45,6 +45,8 @@ class Session(AgentHost):
         self.project_announced = False
         self.share: dict | None = None  # {token, createdAt}: public read-only replay link
         self.connectors_note = ""  # last connector summary told to the agent (re-sent when it changes)
+        self.skills_note = ""  # last skills catalog told to the agent (re-sent when skills are added or disabled)
+        self.picked_skills: set[str] = set()  # skills the user pinned to a message (installed even if disabled)
         self.personal_note = ""  # last profile / instructions / knowledge told to the agent (re-sent when it changes)
         self.model_selection: dict = {}  # {mode, provider?, model?} chosen in the UI (Manus' mode selector)
         self.task: asyncio.Task | None = None
@@ -67,7 +69,7 @@ class Session(AgentHost):
                                                         "files": self.files, "share": self.share,
                                                         "mrCache": self.map_reduce_cache,
                                                         "projectAnnounced": self.project_announced,
-                                                        "personalNote": self.personal_note}, ensure_ascii=False))
+                                                        "personalNote": self.personal_note, "skillsNote": self.skills_note}, ensure_ascii=False))
         (self.dir / "messages.json").write_text(json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
@@ -84,6 +86,7 @@ class Session(AgentHost):
         s.project_announced = meta.get("projectAnnounced", False)
         s.map_reduce_cache = meta.get("mrCache", {})
         s.personal_note = meta.get("personalNote", "")
+        s.skills_note = meta.get("skillsNote", "")
         s.status = meta.get("status", "idle")
         if s.status in ("running", "waiting"):
             s.status = "stopped"  # process restarted mid-run
@@ -206,6 +209,10 @@ class Session(AgentHost):
     def propose_knowledge(self, title: str, content: str) -> dict:
         return personal.store.add(title, content, source="agent", session_id=self.session_id, pending=True)
 
+    def skill_used(self, name: str) -> None:
+        if skills.store:
+            skills.store.used(name)
+
     def stored_file(self, path: str) -> tuple[Path, dict] | None:
         meta = self.files.get(path)
         p = self.dir / "files" / meta["stored"] if meta else None
@@ -236,11 +243,17 @@ class Session(AgentHost):
         self.model_selection = {k: selection[k] for k in ("mode", "provider", "model") if selection.get(k)}
         self.persist()
 
-    async def user_message(self, text: str, attachments: list[str]) -> None:
+    async def user_message(self, text: str, attachments: list[str], selected_skills: list[str] | None = None) -> None:
+        picked = [n for n in selected_skills or [] if n in skills.store.items]
         await self.emit({"type": "chat", "sender": "user", "messageType": "text", "content": text,
                          "attachments": [{"path": p, "filename": p.rsplit("/", 1)[-1], "url": self.file_url(p)}
-                                         for p in attachments]})
+                                         for p in attachments], **({"skills": picked} if picked else {})})
         full = text + (("\n\nAttached files (in the sandbox):\n" + "\n".join(attachments)) if attachments else "")
+        if picked:  # Manus' extData.capabilities.enabledSkills: the user pinned skills to this request
+            self.picked_skills |= set(picked)
+            full += ("\n\n<selected_skills>\nThe user chose these skills for this request. Read each SKILL.md with "
+                     "file_read before starting and follow it:\n" + "\n".join(f"- skills/{n}/SKILL.md" for n in picked)
+                     + "\n</selected_skills>")
         if self.pending_confirms:
             # Typing instead of approving means "no": decline the held actions and pass the message on.
             for aid in list(self.pending_confirms):
@@ -270,7 +283,7 @@ class Session(AgentHost):
             sandbox = await manager.get(self.session_id)
             await self.emit({"type": "sandboxUpdate", "sandboxId": self.session_id, "status": "running",
                              "mode": sandbox.mode, "vnc": sandbox.vnc, "screen": sandbox.info.get("screen")})
-            await skills.install(sandbox)
+            await skills.store.install(sandbox, self.picked_skills)
             profile = providers.resolve(self.model_selection)
             agent = Agent(self, sandbox, self.messages, profile=profile)
             agent.repair_history()
@@ -283,13 +296,14 @@ class Session(AgentHost):
                     f"<environment>\nSandbox OS: Linux ({sandbox.mode} sandbox)\nWorking directory: {sandbox.workdir}\n"
                     f"User uploads: {sandbox.workdir}/upload\nCurrent date: {time.strftime('%Y-%m-%d %H:%M')} "
                     f"({config.UTC_LABEL}, the user's local time; schedules use it too)\n</environment>")
-                if catalog := skills.catalog(sandbox):
-                    system_notes.append(catalog)
                 self.env_announced = True
             if self.project_id and projects.store and self.project_id in projects.store.items and not self.project_announced:
                 paths = await projects.store.install(self.project_id, sandbox)
                 system_notes.append(projects.store.note(self.project_id, paths))
                 self.project_announced = True
+            if (catalog := skills.store.catalog(sandbox)) != self.skills_note:
+                system_notes.append(catalog or "<skills>\nNo skills are enabled now.\n</skills>")
+                self.skills_note = catalog
             if personal.store and (note := personal.store.note()) != self.personal_note:
                 system_notes.append(note or "<user_profile>\nThe user cleared their profile, instructions and knowledge; "
                                     "disregard what was said about them earlier.\n</user_profile>")

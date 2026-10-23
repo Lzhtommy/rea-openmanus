@@ -1,6 +1,9 @@
 ---
 name: browser-tasks
 description: MUST read before logging in, filling forms, booking, ordering, or purchasing anything in the browser.
+title: 浏览器操作
+categories: 自动化
+summary: 在浏览器里登录、填写表单、预订和下单时遵循的安全步骤：先确认、不猜密码、遇到验证码请用户接管。
 ---
 # Interactive browser tasks
 

@@ -26,6 +26,7 @@
         <button class="nav-item" id="nav-library"><span class="nav-ico" data-icon="library"></span><span class="nav-label">资料库</span></button>
         <div class="more-wrap"><button class="nav-item" id="nav-more"><span class="nav-ico" data-icon="more"></span><span class="nav-label">更多</span></button>
           <div class="more-menu hidden" id="more-menu">
+            <button class="mode-item" data-goto-view="skills"><span data-icon="spark"></span>技能</button>
             <button class="mode-item" data-goto-view="personal"><span data-icon="user"></span>个性化</button>
           </div></div>
         <div class="nav-search hidden" id="nav-search"><span data-icon="search"></span><input id="search-input" placeholder="搜索任务" /></div>
@@ -94,6 +95,24 @@
         </div>
       </div>
 
+      <div id="skills" class="hidden">
+        <div class="lib-inner wide">
+          <div class="lib-head"><h2>技能</h2><div class="head-btns">
+            <button class="btn ghost" id="sk-mine">我的技能</button>
+            <div class="more-wrap"><button class="btn primary" id="sk-create">创建</button>
+              <div class="more-menu right hidden" id="sk-create-menu">
+                <button class="mode-item" data-sk-new="agent"><span data-icon="logo"></span>使用 OpenManus 创建技能</button>
+                <button class="mode-item" data-sk-new="write"><span data-icon="pencil"></span>手动编写</button>
+                <label class="mode-item"><span data-icon="upload"></span>上传技能<input type="file" id="sk-upload" accept=".md,.zip" hidden /></label>
+                <button class="mode-item" data-sk-new="github"><span data-icon="github"></span>从 GitHub 导入技能</button>
+              </div></div></div></div>
+          <div class="lib-tabs" id="sk-tabs"></div>
+          <div class="lib-tabs sub" id="sk-cats"></div>
+          <div class="sched-err" id="sk-err"></div>
+          <div id="sk-list"></div>
+        </div>
+      </div>
+
       <div id="personal" class="hidden">
         <div class="lib-inner">
           <div class="lib-head"><h2>个性化</h2></div>
@@ -144,7 +163,12 @@
         <div id="attach-list"></div>
         <textarea id="input" rows="1" placeholder="分配一个任务或提问任何问题"></textarea>
         <div class="composer-bar">
-          <label class="round-btn" title="添加文件"><span data-icon="plus"></span><input id="file-input" type="file" multiple hidden /></label>
+          <div class="more-wrap up"><button type="button" class="round-btn" id="plus-btn" title="添加"><span data-icon="plus"></span></button>
+            <div class="more-menu up hidden" id="plus-menu">
+              <label class="mode-item"><span data-icon="paperclip"></span>添加文件<input id="file-input" type="file" multiple hidden /></label>
+              <button type="button" class="mode-item" id="plus-skills"><span data-icon="spark"></span>使用技能<span class="spacer"></span><span data-icon="chevRight"></span></button>
+              <div class="skill-pick hidden" id="skill-pick"></div>
+            </div></div>
           <span class="spacer"></span>
           <button type="submit" class="send-btn" id="send-btn" title="发送" disabled data-icon="arrowUp"></button>
         </div>
@@ -219,6 +243,33 @@
         <div class="sched-err" id="conn-err"></div>
       </div>
       <div class="cc-actions"><button type="button" class="btn ghost" id="conn-cancel">取消</button><button type="submit" class="btn primary" id="conn-save">连接</button></div>
+    </form>
+  </div>
+
+  <div id="skill-modal" class="hidden">
+    <div class="sched-card skill-card">
+      <div class="viewer-head"><span class="auto-ico" data-icon="spark"></span><div class="viewer-title"><div id="sk-m-title" style="font-size:16px;font-weight:500"></div><div id="sk-m-sub" class="muted" style="font-size:12px"></div></div>
+        <button class="btn ghost sm hidden" id="sk-m-edit">编辑</button><button type="button" class="icon-btn" id="sk-m-close" data-icon="x"></button></div>
+      <div class="sched-body" id="sk-m-body"></div>
+      <div class="cc-actions hidden" id="sk-m-actions"><span class="sched-err" id="sk-m-err"></span><span class="spacer"></span><button class="btn ghost" id="sk-m-cancel">取消</button><button class="btn primary" id="sk-m-save">保存</button></div>
+    </div>
+  </div>
+
+  <div id="skill-new-modal" class="hidden">
+    <form class="sched-card" id="sk-new-form" autocomplete="off">
+      <div class="viewer-head"><div class="viewer-title"><div id="sk-new-title" style="font-size:16px;font-weight:500">手动编写技能</div></div><button type="button" class="icon-btn" id="sk-new-close" data-icon="x"></button></div>
+      <div class="sched-body" id="sk-new-write">
+        <div class="sched-row"><label>显示名称<input name="title" placeholder="例如：周报撰写" /></label><label>标识<input name="name" placeholder="weekly-report" pattern="[a-z0-9][a-z0-9-]*" title="小写字母、数字和连字符" /></label></div>
+        <label>何时使用（Agent 根据这句话判断是否读取该技能）<input name="description" placeholder="MUST read before writing a weekly report." /></label>
+        <div class="sk-cat-pick" id="sk-new-cats"></div>
+        <label>操作说明（Markdown）<textarea name="body" rows="9" placeholder="# 周报撰写&#10;1. 先写本周结论……"></textarea></label>
+      </div>
+      <div class="sched-body hidden" id="sk-new-github">
+        <label>GitHub 地址<input name="url" placeholder="https://github.com/owner/repo/tree/main/skills/my-skill" /></label>
+        <div class="muted" style="font-size:12px">填写包含 SKILL.md 的目录地址；整个目录（脚本、模板等）都会被导入。</div>
+      </div>
+      <div class="sched-err" id="sk-new-err" style="padding:0 18px"></div>
+      <div class="cc-actions"><button type="button" class="btn ghost" id="sk-new-cancel">取消</button><button type="submit" class="btn primary" id="sk-new-save">保存</button></div>
     </form>
   </div>
 

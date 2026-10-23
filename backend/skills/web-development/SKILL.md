@@ -1,6 +1,9 @@
 ---
 name: web-development
 description: MUST read before building any website, web page, web app, dashboard, or browser game.
+title: 网页开发
+categories: 编程、设计
+summary: 搭建网站、网页应用和小游戏：选型、相对路径、本地验证，再生成预览链接。
 ---
 # Web development
 

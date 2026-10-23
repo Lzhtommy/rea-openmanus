@@ -57,6 +57,9 @@ const ICONS = {
   folderPlus: '<path d="M12 10v6M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   library: '<path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"/>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
+  spark: '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+  github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.1-1.3-.3-2.5-1-3.5.3-1.2.3-2.4 0-3.5 0 0-1 0-3 1.5-2.6-.5-5.4-.5-8 0C6 2 5 2 5 2c-.3 1.1-.3 2.3 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.4.5-.7 1-.8 1.6-.2.6-.3 1.3-.2 1.9v4"/><path d="M9 18c-4.5 2-5-2-7-2"/>',
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   brain: '<path d="M12 5a3 3 0 1 0-6 .1 4 4 0 0 0-2.5 5.9A4 4 0 0 0 6 18a3 3 0 0 0 6 0z"/><path d="M12 5a3 3 0 1 1 6 .1 4 4 0 0 1 2.5 5.9A4 4 0 0 1 18 18a3 3 0 0 1-6 0zM12 5v13"/>',
@@ -119,6 +122,7 @@ const S = {
   vnc: false, vncFailed: false,
   attachments: [], previews: {},
   personal: { profile: {}, instructions: "", knowledge: [] }, persTab: "profile", editingKnow: null,
+  skills: { skills: [], catalog: [], categories: [] }, skTab: "explore", skCat: "all", skSrc: "all", pickedSkills: [], skillView: null,
 };
 
 function resetSession() {
@@ -239,10 +243,11 @@ function scheduleRender(scrollEnd = false) {
 
 function renderAll() {
   const auto = S.view === "automations", conn = S.view === "connectors";
-  const proj = S.view === "project", pers = S.view === "personal";
-  const lib = S.view === "library" || auto || conn || proj || pers; // full-page views without a composer dock
+  const proj = S.view === "project", pers = S.view === "personal", sk = S.view === "skills";
+  const lib = S.view === "library" || auto || conn || proj || pers || sk; // full-page views without a composer dock
   $("#personal").classList.toggle("hidden", !pers);
-  $("#nav-more").classList.toggle("active", pers);
+  $("#skills").classList.toggle("hidden", !sk);
+  $("#nav-more").classList.toggle("active", pers || sk);
   $("#project-view").classList.toggle("hidden", !proj);
   const home = !S.current && !lib;
   $("#home").classList.toggle("hidden", !home);
@@ -255,8 +260,8 @@ function renderAll() {
   $("#dock").classList.toggle("hidden", home || lib);
   $("#nav-library").classList.toggle("active", S.view === "library");
   (proj ? $("#proj-slot") : home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  $("#composer").classList.toggle("hidden", pers);
-  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  $("#composer").classList.toggle("hidden", pers || sk);
+  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : sk ? "技能" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   renderModeButton();
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
@@ -266,6 +271,7 @@ function renderAll() {
   if (conn) { renderConnectors(); renderPanel(); return; }
   if (proj) { renderProject(); renderPanel(); return; }
   if (pers) { renderPersonal(); renderPanel(); return; }
+  if (sk) { renderSkills(); renderPanel(); return; }
   if (lib) { renderLibrary(); renderPanel(); return; }
   if (home) { renderPanel(); return; }
 
@@ -337,7 +343,8 @@ const shortModel = (m) => String(m).split("/").pop();
 
 function userHtml(ev) {
   const files = (ev.attachments || []).map((a) => `<a class="chip-file" href="${esc(a.url)}" target="_blank">${icon("fileText")}<span>${esc(a.filename)}</span></a>`).join("");
-  return `<div class="msg-user"><div><div class="bubble">${esc(ev.content)}</div>${files ? `<div class="files">${files}</div>` : ""}</div></div>`;
+  const sks = (ev.skills || []).map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span></span>`).join("");
+  return `<div class="msg-user"><div><div class="bubble">${esc(ev.content)}</div>${files || sks ? `<div class="files">${sks}${files}</div>` : ""}</div></div>`;
 }
 
 function itemHtml(t, it, isCurrent) {
@@ -471,6 +478,8 @@ function cardsHtml(list) {
     const preview = TEXTY.has(e) || IMG.has(e);
     return `<div class="file-card"><div class="fc-head" data-act="open-file" data-url="${esc(a.url)}" data-name="${esc(a.filename)}" data-path="${esc(a.path)}">` +
       `<span class="fc-ico ${cls}">${icon(ic)}</span><span class="fc-name">${esc(a.filename)}<div class="fc-sub">${esc(e.toUpperCase() || "文件")}</div></span>` +
+      (a.filename === "SKILL.md" && !S.readonly ? (S.skills.skills.some((x) => x.name === basename(String(a.path).replace(/\/SKILL\.md$/, "")) && x.source === "personal")
+        ? `<span class="sk-added">${icon("check")}已在我的技能中</span>` : `<button class="btn ghost sm" data-act="add-skill" data-path="${esc(a.path)}">${icon("plus")}添加到我的技能</button>`) : "") +
       `<a class="icon-btn" href="${esc(a.url)}" download="${esc(a.filename)}" title="下载" data-stop="1">${icon("download")}</a></div>` +
       (preview ? `<div class="fc-preview" data-preview="${esc(a.url)}" data-kind="${IMG.has(e) ? "img" : e}" data-act="open-file" data-url="${esc(a.url)}" data-name="${esc(a.filename)}" data-path="${esc(a.path)}"></div>` : "") +
       `</div>`;
@@ -1002,6 +1011,114 @@ function openViewer(f) {
 }
 function closeViewer() { $("#viewer").classList.add("hidden"); S.viewing = null; }
 
+// ------------------------------------------------------------------ skills (技能) ---
+const SK_SRC = { official: "官方", personal: "个人", github: "第三方" };
+const skillTitle = (n) => S.skills.skills.find((x) => x.name === n)?.title || n;
+async function loadSkills() { try { S.skills = await (await fetch("/api/skills")).json(); } catch { /* keep */ } }
+async function openSkills(tab) {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "skills"; if (tab) S.skTab = tab;
+  history.replaceState(null, "", "#skills");
+  renderSessions(); $("#sk-err").textContent = "";
+  await loadSkills(); scheduleRender();
+}
+function skCardHtml(x, kind) {
+  const cats = (x.categories || []).map((c) => `<span class="lib-tag">${esc(c)}</span>`).join("");
+  const meta = kind === "catalog" ? `<span>${icon("github")}${esc(x.author)}</span>` : `<span>${esc(x.author || SK_SRC[x.source])}</span>${x.uses ? `<span>已使用 ${x.uses} 次</span>` : ""}`;
+  let act;
+  if (kind === "catalog") act = x.installed ? `<span class="sk-added">${icon("check")}已添加</span>` : `<button class="btn ghost sm" data-sk="install" data-url="${esc(x.url)}">${icon("plus")}添加</button>`;
+  else if (kind === "explore") act = x.enabled ? `<span class="sk-added">${icon("check")}已添加</span>` : `<button class="btn ghost sm" data-sk="enable" data-name="${esc(x.name)}">${icon("plus")}添加</button>`;
+  else act = `<button class="switch ${x.enabled ? "on" : ""}" data-sk="toggle" data-name="${esc(x.name)}" title="${x.enabled ? "停用" : "启用"}"><i></i></button>`;
+  return `<div class="sk-card ${kind === "mine" && !x.enabled ? "off" : ""}" ${kind !== "catalog" ? `data-sk-open="${esc(x.name)}"` : ""}>` +
+    `<div class="sk-top"><span class="auto-ico">${icon(kind === "catalog" || x.source === "github" ? "github" : "spark")}</span><div class="sk-title">${esc(x.title || x.name)}<div class="sk-name">${esc(x.name)}</div></div>${act}</div>` +
+    `<div class="sk-desc">${esc(x.summary || x.description)}</div><div class="sk-meta">${meta}<span class="spacer"></span>${cats}</div></div>`;
+}
+function renderSkills() {
+  const { skills, catalog, categories } = S.skills;
+  $("#sk-mine").classList.toggle("on", S.skTab === "mine");
+  $("#sk-tabs").innerHTML = [["explore", "探索技能"], ["mine", "我的技能"]].map(([k, l]) => `<button class="lib-tab ${S.skTab === k ? "on" : ""}" data-sktab="${k}">${l}</button>`).join("");
+  const catOk = (x) => S.skCat === "all" || (x.categories || []).includes(S.skCat);
+  if (S.skTab === "explore") {
+    $("#sk-cats").innerHTML = [["all", "全部"], ...categories.map((c) => [c, c])].map(([k, l]) => `<button class="lib-tab ${S.skCat === k ? "on" : ""}" data-skcat="${esc(k)}">${l}</button>`).join("");
+    const off = skills.filter((x) => x.source === "official" && catOk(x)), cat = catalog.filter(catOk);
+    $("#sk-list").innerHTML = (off.length ? `<div class="nav-section" style="padding-left:0">官方技能</div><div class="sk-grid">${off.map((x) => skCardHtml(x, "explore")).join("")}</div>` : "") +
+      (cat.length ? `<div class="nav-section" style="padding-left:0">社区技能 · 来自 GitHub</div><div class="sk-grid">${cat.map((x) => skCardHtml(x, "catalog")).join("")}</div>` : "") ||
+      `<div class="lib-empty">${icon("spark")}<div>该分类下还没有技能</div></div>`;
+  } else {
+    const count = (k) => skills.filter((x) => (k === "all" ? x.enabled || x.source !== "official" : x.source === k)).length;
+    $("#sk-cats").innerHTML = [["all", "全部"], ["personal", "个人"], ["official", "官方"], ["github", "第三方"]].map(([k, l]) => `<button class="lib-tab ${S.skSrc === k ? "on" : ""}" data-sksrc="${k}">${l}<span>${count(k)}</span></button>`).join("");
+    const rows = skills.filter((x) => (S.skSrc === "all" ? x.enabled || x.source !== "official" : x.source === S.skSrc));
+    $("#sk-list").innerHTML = rows.length ? `<div class="sk-grid">${rows.map((x) => skCardHtml(x, "mine")).join("")}</div>`
+      : `<div class="lib-empty">${icon("spark")}<div>尚无技能</div><div class="muted">点击右上角「创建」，或在「探索技能」中添加</div></div>`;
+  }
+}
+async function skAction(op, b) {
+  $("#sk-err").textContent = "";
+  if (op === "toggle" || op === "enable") {
+    const x = S.skills.skills.find((k) => k.name === b.dataset.name);
+    await fetch(`/api/skills/${b.dataset.name}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: op === "enable" || !x.enabled }) });
+  }
+  if (op === "install") {
+    b.disabled = true; b.innerHTML = `<span class="spin">${icon("loader")}</span>添加中`;
+    const r = await fetch("/api/skills/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: b.dataset.url }) });
+    if (!r.ok) $("#sk-err").textContent = (await r.json().catch(() => ({}))).detail || "添加失败";
+  }
+  await loadSkills(); renderSkills();
+}
+async function openSkill(name) {
+  const r = await fetch(`/api/skills/${name}`); if (!r.ok) return;
+  const x = await r.json(); S.skillView = x;
+  $("#sk-m-title").textContent = x.title || x.name;
+  $("#sk-m-sub").textContent = [SK_SRC[x.source], x.author, x.uses ? `已使用 ${x.uses} 次` : "", x.repo || ""].filter(Boolean).join(" · ");
+  $("#sk-m-edit").classList.toggle("hidden", !x.editable);
+  $("#sk-m-actions").classList.add("hidden");
+  const files = x.files.length > 1 ? `<div class="mcp-label">文件</div><div class="tool-chips">${x.files.map((f) => `<span class="tool-chip">${esc(f)}</span>`).join("")}</div>` : "";
+  $("#sk-m-body").innerHTML = `<div class="sk-desc full">${esc(x.summary || x.description)}</div>${x.summary && x.summary !== x.description ? `<div class="muted" style="font-size:12px">触发条件：${esc(x.description)}</div>` : ""}${files}<div class="mcp-label">SKILL.md</div><div class="page-md sk-md"><div class="prose">${md(x.content)}</div></div>` +
+    `<div class="cc-actions" style="padding:0"><button class="btn ghost sm" data-sk-use="${esc(x.name)}">${icon("play2")}在新任务中使用</button><span class="spacer"></span>` +
+    (x.source === "official" ? "" : `<button class="btn ghost sm danger" data-sk-del="${esc(x.name)}">${icon("trash")}删除</button>`) + `</div>`;
+  $("#skill-modal").classList.remove("hidden");
+}
+function editSkill() {
+  const x = S.skillView;
+  $("#sk-m-body").innerHTML = `<textarea id="sk-m-text" class="code-edit" rows="22" spellcheck="false">${esc(x.content)}</textarea>`;
+  $("#sk-m-actions").classList.remove("hidden"); $("#sk-m-err").textContent = ""; $("#sk-m-edit").classList.add("hidden");
+}
+async function saveSkillEdit() {
+  const r = await fetch(`/api/skills/${S.skillView.name}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: $("#sk-m-text").value }) });
+  if (!r.ok) { $("#sk-m-err").textContent = (await r.json().catch(() => ({}))).detail || "保存失败"; return; }
+  await loadSkills(); renderSkills(); openSkill(S.skillView.name);
+}
+function useSkill(name) {
+  $("#skill-modal").classList.add("hidden");
+  goHome(); S.pickedSkills = [name]; renderAttachments(); $("#input").focus();
+}
+function openSkillNew(kind) {
+  const f = $("#sk-new-form"); f.reset(); f.dataset.kind = kind;
+  $("#sk-new-title").textContent = kind === "github" ? "从 GitHub 导入技能" : "手动编写技能";
+  $("#sk-new-write").classList.toggle("hidden", kind !== "write"); $("#sk-new-github").classList.toggle("hidden", kind !== "github");
+  $("#sk-new-cats").innerHTML = `<span class="muted" style="font-size:13px">分类</span>` + S.skills.categories.map((c) => `<label class="check"><input type="checkbox" value="${esc(c)}" />${esc(c)}</label>`).join("");
+  $("#sk-new-save").textContent = kind === "github" ? "导入" : "保存"; $("#sk-new-err").textContent = "";
+  $("#skill-new-modal").classList.remove("hidden");
+}
+async function saveSkillNew(e) {
+  e.preventDefault();
+  const f = e.target, kind = f.dataset.kind, btn = $("#sk-new-save");
+  const body = kind === "github" ? { url: f.url.value } : { title: f.title.value, name: f.name.value || f.title.value, description: f.description.value, body: f.body.value,
+    categories: [...document.querySelectorAll("#sk-new-cats input:checked")].map((n) => n.value) };
+  btn.disabled = true; const label = btn.textContent; btn.textContent = kind === "github" ? "导入中…" : "保存中…";
+  const r = await fetch(kind === "github" ? "/api/skills/import" : "/api/skills", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  btn.disabled = false; btn.textContent = label;
+  if (!r.ok) { $("#sk-new-err").textContent = (await r.json().catch(() => ({}))).detail || "保存失败"; return; }
+  const x = await r.json();
+  $("#skill-new-modal").classList.add("hidden");
+  S.skTab = "mine"; S.skSrc = "all"; await loadSkills(); renderSkills(); openSkill(x.name);
+}
+function renderSkillPick() {
+  const list = S.skills.skills.filter((x) => x.enabled || S.pickedSkills.includes(x.name));
+  $("#skill-pick").innerHTML = list.map((x) => `<label class="mode-item"><input type="checkbox" data-pick="${esc(x.name)}" ${S.pickedSkills.includes(x.name) ? "checked" : ""} /><span class="grow">${esc(x.title)}<span class="muted"> ${esc(x.name)}</span></span></label>`).join("") +
+    `<button type="button" class="mode-item muted" id="pick-manage">${icon("spark")}管理技能</button>`;
+}
+
 // ------------------------------------------------------------------ personalization (个性化) ---
 async function loadPersonal() {
   try { S.personal = await (await fetch("/api/personalization")).json(); } catch { /* keep */ }
@@ -1231,14 +1348,14 @@ async function submit(text) {
   const sid = await ensureSession();
   S.modelSel = sel;
   await new Promise((r) => setTimeout(r, 60));
-  send({ type: "user_message", sessionId: sid, content: text, attachments: S.attachments.map((a) => a.path), model: sel });
-  S.attachments = []; renderAttachments();
+  send({ type: "user_message", sessionId: sid, content: text, attachments: S.attachments.map((a) => a.path), model: sel, skills: S.pickedSkills });
+  S.attachments = []; S.pickedSkills = []; renderAttachments();
   $("#input").value = ""; autoGrow(); stickBottom = true;
   renderComposerState();
 }
 function autoGrow() { const i = $("#input"); i.style.height = "auto"; i.style.height = Math.min(i.scrollHeight, 240) + "px"; }
 function renderAttachments() {
-  $("#attach-list").innerHTML = S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
+  $("#attach-list").innerHTML = S.pickedSkills.map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span><button type="button" data-rmskill="${esc(n)}">${icon("x")}</button></span>`).join("") + S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
 }
 
 // ------------------------------------------------------------------ theme ---
@@ -1254,7 +1371,16 @@ function bind() {
   $("#composer").onsubmit = (e) => { e.preventDefault(); submit($("#input").value); };
   $("#input").addEventListener("input", () => { autoGrow(); renderComposerState(); });
   $("#input").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if ($("#input").value.trim()) submit($("#input").value); } };
-  $("#attach-list").onclick = (e) => { const b = e.target.closest("[data-rm]"); if (b) { S.attachments.splice(+b.dataset.rm, 1); renderAttachments(); } };
+  $("#attach-list").onclick = (e) => {
+    const k = e.target.closest("[data-rmskill]"); if (k) { S.pickedSkills = S.pickedSkills.filter((n) => n !== k.dataset.rmskill); renderAttachments(); return; }
+    const b = e.target.closest("[data-rm]"); if (b) { S.attachments.splice(+b.dataset.rm, 1); renderAttachments(); }
+  };
+  $("#plus-btn").onclick = (e) => { e.stopPropagation(); $("#plus-menu").classList.toggle("hidden"); $("#skill-pick").classList.add("hidden"); };
+  $("#plus-skills").onclick = async (e) => { e.stopPropagation(); await loadSkills(); renderSkillPick(); $("#skill-pick").classList.toggle("hidden"); };
+  $("#plus-menu").onclick = (e) => e.stopPropagation();
+  $("#skill-pick").onchange = (e) => { const n = e.target.dataset.pick; if (!n) return; S.pickedSkills = e.target.checked ? [...S.pickedSkills, n] : S.pickedSkills.filter((x) => x !== n); renderAttachments(); };
+  $("#skill-pick").onclick = (e) => { if (e.target.closest("#pick-manage")) { $("#plus-menu").classList.add("hidden"); openSkills("mine"); } };
+  document.addEventListener("click", () => $("#plus-menu").classList.add("hidden"));
   $("#file-input").onchange = async (e) => {
     const sid = await ensureSession();
     for (const f of e.target.files) {
@@ -1262,7 +1388,7 @@ function bind() {
       const r = await fetch(`/api/sessions/${sid}/upload`, { method: "POST", body: fd });
       if (r.ok) { const j = await r.json(); S.attachments.push({ name: f.name, path: j.path }); } else alert(`上传失败：${await r.text()}`);
     }
-    e.target.value = ""; renderAttachments();
+    e.target.value = ""; renderAttachments(); $("#plus-menu").classList.add("hidden");
   };
 
   const newTask = () => goHome();
@@ -1318,7 +1444,38 @@ function bind() {
   };
   $("#nav-auto").onclick = openAutomations;
   $("#nav-more").onclick = (e) => { e.stopPropagation(); $("#more-menu").classList.toggle("hidden"); };
-  $("#more-menu").onclick = (e) => { const b = e.target.closest("[data-goto-view]"); if (!b) return; $("#more-menu").classList.add("hidden"); if (b.dataset.gotoView === "personal") openPersonal(); };
+  $("#more-menu").onclick = (e) => { const b = e.target.closest("[data-goto-view]"); if (!b) return; $("#more-menu").classList.add("hidden"); if (b.dataset.gotoView === "personal") openPersonal(); if (b.dataset.gotoView === "skills") openSkills(); };
+  $("#sk-tabs").onclick = (e) => { const b = e.target.closest("[data-sktab]"); if (b) { S.skTab = b.dataset.sktab; renderSkills(); } };
+  $("#sk-mine").onclick = () => { S.skTab = "mine"; renderSkills(); };
+  $("#sk-cats").onclick = (e) => { const b = e.target.closest("[data-skcat],[data-sksrc]"); if (!b) return; if (b.dataset.skcat) S.skCat = b.dataset.skcat; else S.skSrc = b.dataset.sksrc; renderSkills(); };
+  $("#sk-list").onclick = (e) => { const b = e.target.closest("[data-sk]"); if (b) { e.stopPropagation(); skAction(b.dataset.sk, b); return; } const c = e.target.closest("[data-sk-open]"); if (c) openSkill(c.dataset.skOpen); };
+  $("#sk-create").onclick = (e) => { e.stopPropagation(); $("#sk-create-menu").classList.toggle("hidden"); };
+  $("#sk-create-menu").onclick = (e) => {
+    const b = e.target.closest("[data-sk-new]"); if (!b) return;
+    $("#sk-create-menu").classList.add("hidden");
+    if (b.dataset.skNew === "agent") { goHome(); S.pickedSkills = ["skill-creator"]; renderAttachments(); $("#input").value = "帮我创建一个技能："; autoGrow(); renderComposerState(); $("#input").focus(); return; }
+    openSkillNew(b.dataset.skNew);
+  };
+  $("#sk-upload").onchange = async (e) => {
+    $("#sk-create-menu").classList.add("hidden");
+    const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+    const fd = new FormData(); fd.append("file", f);
+    const r = await fetch("/api/skills/upload", { method: "POST", body: fd });
+    if (!r.ok) { $("#sk-err").textContent = (await r.json().catch(() => ({}))).detail || "上传失败"; return; }
+    const x = await r.json(); S.skTab = "mine"; S.skSrc = "all"; await loadSkills(); renderSkills(); openSkill(x.name);
+  };
+  $("#sk-new-form").onsubmit = saveSkillNew;
+  $("#sk-new-close").onclick = $("#sk-new-cancel").onclick = () => $("#skill-new-modal").classList.add("hidden");
+  $("#sk-m-close").onclick = () => $("#skill-modal").classList.add("hidden");
+  $("#sk-m-edit").onclick = editSkill;
+  $("#sk-m-cancel").onclick = () => openSkill(S.skillView.name);
+  $("#sk-m-save").onclick = saveSkillEdit;
+  $("#sk-m-body").onclick = async (e) => {
+    const u = e.target.closest("[data-sk-use]"); if (u) return useSkill(u.dataset.skUse);
+    const d = e.target.closest("[data-sk-del]");
+    if (d && confirm(`删除技能「${S.skillView.title}」？`)) { await fetch(`/api/skills/${d.dataset.skDel}`, { method: "DELETE" }); $("#skill-modal").classList.add("hidden"); await loadSkills(); renderSkills(); }
+  };
+  document.addEventListener("click", (e) => { if (!e.target.closest("#sk-create") && !e.target.closest("#sk-create-menu")) $("#sk-create-menu").classList.add("hidden"); });
   document.addEventListener("click", (e) => { if (!e.target.closest(".more-wrap")) $("#more-menu").classList.add("hidden"); });
   $("#pers-tabs").onclick = (e) => { const b = e.target.closest("[data-ptab]"); if (b) { S.persTab = b.dataset.ptab; renderPersonal(); } };
   $("#pers-profile").onsubmit = saveProfile;
@@ -1410,6 +1567,14 @@ function bind() {
       case "plan": e.stopPropagation(); S.planOpen = !S.planOpen; renderTaskbar(); return;
       case "takeover": if (!S.readonly) toggleTakeover(); break;
       case "know": if (!S.readonly) knowAction(a.dataset.op, a.dataset.id); break;
+      case "add-skill": {
+        e.stopPropagation();
+        if (S.readonly) break;
+        a.disabled = true; a.textContent = "添加中…";
+        fetch("/api/skills/from-session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: S.current, path: a.dataset.path }) })
+          .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) { a.textContent = j.detail || "添加失败"; a.disabled = false; return; } await loadSkills(); refreshSel(); });
+        break;
+      }
       case "mr": {
         if (S.readonly) break;
         const msg = { type: "map_reduce_control", sessionId: S.current, actionId: a.dataset.id, op: a.dataset.op };
@@ -1466,6 +1631,7 @@ async function deleteSession(sid) {
     await loadModels();
     await loadProjects();
     await loadPersonal(); renderMe();
+    await loadSkills();
     $("#config-info").textContent = `${shortModel(S.cfg.model)} · ${S.cfg.sandbox} 沙箱`;
   } catch { /* backend not reachable yet */ }
   await refreshSessions();
@@ -1475,6 +1641,7 @@ async function deleteSession(sid) {
   else if (sid === "automations") openAutomations();
   else if (sid === "connectors") openConnectors();
   else if (sid === "personal") openPersonal();
+  else if (sid === "skills") openSkills();
   else if (sid.startsWith("project/")) openProject(sid.slice(8));
   else openSession(sid && S.sessions.some((s) => s.id === sid) ? sid : null);
   autoGrow();

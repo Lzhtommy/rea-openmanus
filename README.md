@@ -8,7 +8,8 @@
 - **Agent Loop**：分析事件 → 选择工具 → 沙箱执行 → 观察 → 迭代 → 交付 → idle
 - **34 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`、`info_extract_webpage`、`deploy_expose_port`、`message_*`、`plan_update`、`agent_map_reduce`、`schedule_create`、`knowledge_save`、`mcp_*`、`idle`
 - **并行工具调用**：一轮里如果全是只读调用（搜索、网页提取、读文件），就并发执行
-- **Planner 模块**：结构化输出生成计划；**Skills**：`backend/skills/<name>/SKILL.md` 装进沙箱，上下文里只放目录，Agent 按需读取
+- **Planner 模块**：结构化输出生成计划
+- **技能**（"更多 → 技能"）：官方技能（`backend/skills/`）、个人技能（手动编写、上传 SKILL.md/zip、或让 Agent 用内置的技能创建器写好后在文件卡片上"添加到我的技能"）、第三方技能（从 GitHub 目录导入，探索页有精选目录）；可启用/停用、在线编辑、统计使用次数；输入框"+ → 使用技能"把技能指定给当前消息（对应 Manus 的 `enabledSkills`）。启用的技能整目录装进沙箱，上下文里只放名称和触发说明，Agent 按需读取
 - **交付语义**：`chat.deliveryKind` 分为 `opening` / `progress` / `result`；任务结束后生成追问建议（`suggestion` 步骤）
 - **Wide Research**：`agent_map_reduce` 并行派发同构子代理
 - **上下文工程**：静态前缀加 prompt caching、只追加的历史、按前缀遮蔽工具、可恢复压缩（大观察结果落盘到沙箱）、错误保留、计划复述

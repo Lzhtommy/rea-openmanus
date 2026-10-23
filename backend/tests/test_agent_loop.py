@@ -87,6 +87,8 @@ def store(monkeypatch):
     monkeypatch.setattr(llm, "plan", fake_plan)
     monkeypatch.setattr(llm, "suggest", fake_suggest)
     monkeypatch.setattr(agent_mod, "search_web", fake_search)
+    from app import skills
+    skills.store = skills.Skills()
     session_mod.store = session_mod.SessionStore()
     yield session_mod.store
 
@@ -606,3 +608,40 @@ async def test_personalization(store, monkeypatch, tmp_path):
     await wait_status(s, {"idle"})
     notes = [m["content"] for m in s.messages if m["role"] == "system" and "<knowledge>" in m["content"]]
     assert len(notes) == 2 and "报告默认使用中文" in notes[-1]
+
+
+@pytest.mark.asyncio
+async def test_skills_library(store, monkeypatch, tmp_path):
+    """Personal / uploaded skills, enable switch, usage counting, and skills pinned to one message."""
+    import io
+    import zipfile
+    from app import skills
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    skills.store = st = skills.Skills()
+    assert {"deep-research", "skill-creator"} <= set(st.items) and st.items["deep-research"].source == "official"
+    st.create({"title": "周报撰写", "name": "weekly-report", "description": "MUST read before writing a weekly report.",
+               "categories": ["内容", "不存在"], "body": "# 周报\n先写结论。"})
+    v = st.view(st.get("weekly-report"), full=True)
+    assert v["categories"] == ["内容"] and v["editable"] and "先写结论" in v["content"]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("pack/my-tool/SKILL.md", "---\nname: my-tool\ndescription: Use for X.\n---\nRun scripts/go.sh")
+        z.writestr("pack/my-tool/scripts/go.sh", "echo go")
+    assert st.from_upload("my-tool.zip", buf.getvalue())["files"] == ["SKILL.md", "scripts/go.sh"]
+    with pytest.raises(skills.SkillError):
+        st.from_files({"SKILL.md": b"---\nname: x\ndescription: d\n---\n", "../evil": b"x"}, "personal")
+    with pytest.raises(skills.SkillError):
+        st.delete("deep-research")
+    st.set_enabled("weekly-report", False)
+    model = ScriptedModel([msg(tool("file_read", file="skills/weekly-report/SKILL.md")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("写本周周报", [], ["weekly-report"])
+    await wait_status(s, {"idle"})
+    note = next(m["content"] for m in s.messages if m["role"] == "system")
+    assert "my-tool" in note and "weekly-report" not in note  # disabled: not in the catalog...
+    assert "<selected_skills>" in s.messages[0]["content"][0]["text"]  # ...but pinned to this message
+    read = next(e for e in s.events if e.get("name") == "file_read" and e["status"] == "success")
+    assert "先写结论" in read["detail"]["textEditor"]["content"]  # installed although disabled
+    assert st.state["weekly-report"]["uses"] == 1
+    assert next(e for e in s.events if e["type"] == "chat")["skills"] == ["weekly-report"]

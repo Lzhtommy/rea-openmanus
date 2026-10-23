@@ -1,6 +1,9 @@
 ---
 name: deep-research
 description: MUST read before the first search of any research, investigation, comparison, or report-writing task.
+title: 深度调研
+categories: 内容、商业
+summary: 系统化调研：拆解问题、并行检索与阅读原始资料、交叉核验，最后输出带引用的报告。
 ---
 # Deep research
 

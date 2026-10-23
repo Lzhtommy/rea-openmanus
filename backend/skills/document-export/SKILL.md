@@ -1,6 +1,9 @@
 ---
 name: document-export
 description: MUST read before producing a PDF, Word (.docx), or slide file, or converting Markdown/HTML to another format.
+title: 文档导出
+categories: 内容
+summary: 把 Markdown 或 HTML 转成 PDF、Word 和幻灯片文件，处理中文字体和版式。
 ---
 # Document export
 

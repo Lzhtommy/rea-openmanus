@@ -201,6 +201,7 @@ webdev 全栈托管（自定义域名、Stripe 等）、Connectors 和 MCP 市�
 | `ProjectService` 项目 | `projects.py`：指令 + 文件，任务首轮装入沙箱 |
 | `start_sandbox` 等沙箱生命周期 | 空闲回收：`docker stop` 保留文件，下次使用自动 `docker start` |
 | `/app/personalization`：个人资料、自定义指令、知识、"从其他 AI 导入记忆"；`knowledge` 事件 | `personal.py`：每次运行开头以 system 消息注入（内容变化才重发）；`knowledge_save` 只提议、用户接受后生效；`llm.import_memory` 结构化解析导出文本 |
+| `/app/skills`：探索技能、我的技能（个人/官方/第三方）、使用 Manus 创建 / 上传 / 从 GitHub 导入；`enabledSkills` | `skills.py`：三种来源、启用开关、使用计数（Agent 读取 SKILL.md 时计数）；按消息指定的技能以 `<selected_skills>` 追加在用户消息里，即使停用也会装入沙箱；技能目录变化时重发 `<skills>` 系统消息 |
 | `ScheduledTask` / 自动化 | `scheduler.py`（once/interval/daily/weekly），`/api/schedules`、`schedule_create` 工具、"自动化"页面 |
 这些都是在同一个 Agent 内核上叠加的业务功能，事件协议里已预留扩展点（`toolUsed.tool` 新增类别即可）。
 

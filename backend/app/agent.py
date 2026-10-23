@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -66,6 +67,7 @@ class AgentHost:
     async def keep_file(self, path: str, kind: str) -> None: ...
     def create_schedule(self, args: dict) -> dict: raise NotImplementedError
     def propose_knowledge(self, title: str, content: str) -> dict: raise NotImplementedError
+    def skill_used(self, name: str) -> None: ...
     def preview_url(self, port: int) -> str: return ""
     def persist(self) -> None: ...
 
@@ -323,6 +325,8 @@ class Agent:
         # ---- files
         if name == "file_read":
             r = await sb.call("/file/read", a)
+            if m := re.fullmatch(rf"{re.escape(sb.workdir)}/skills/([\w-]+)/SKILL\.md", r["file"]):
+                host.skill_used(m.group(1))
             return ToolOutcome(f"{r['file']} ({r['total_lines']} lines):\n{r['content']}",
                                {"textEditor": {"path": r["file"], "content": r["content"][:50000], "op": "read"}})
         if name == "file_write":
