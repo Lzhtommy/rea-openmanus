@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from . import config, providers
 from .providers import Profile
-from .prompts import AUTOMATION_PROMPT, AUTOMATION_SCHEMA, IMPORT_PROMPT, IMPORT_SCHEMA, PLANNER_PROMPT, PLANNER_SCHEMA, SUGGEST_PROMPT, SUGGEST_SCHEMA, SYSTEM_PROMPT
+from .prompts import AUTOMATION_PROMPT, AUTOMATION_SCHEMA, RECORD_PROMPT, RECORD_SCHEMA, IMPORT_PROMPT, IMPORT_SCHEMA, PLANNER_PROMPT, PLANNER_SCHEMA, SUGGEST_PROMPT, SUGGEST_SCHEMA, SYSTEM_PROMPT
 from .tools import TOOLS
 
 log = logging.getLogger("manus.llm")
@@ -379,3 +379,10 @@ async def parse_automation(text: str, now: str, profile: Profile | None = None) 
     """A plain-language automation ("当 X 时做 Y", "每天早上…") as a schedule / condition / webhook spec."""
     return await _structured("automation", AUTOMATION_PROMPT, AUTOMATION_SCHEMA,
                              f"<now>{now}</now>\n<description>\n{text[:4000]}\n</description>", profile)
+
+
+async def draft_recorded_skill(steps: str, notes: str, profile: Profile | None = None) -> dict | None:
+    """A SKILL.md draft from a recorded browser workflow (the skill recorder)."""
+    return await _structured("record_skill", RECORD_PROMPT, RECORD_SCHEMA,
+                             f"<user_notes>\n{notes[:3000] or '(none)'}\n</user_notes>\n\n<recorded_actions>\n{steps[:20000]}\n</recorded_actions>",
+                             profile)

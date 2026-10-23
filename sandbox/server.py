@@ -573,6 +573,100 @@ async def web_screenshot(req: ShotReq):
         await ctx.close()
 
 
+# ---------------------------------------------------------------- recorder ---
+# Skill recorder: while the user demonstrates a workflow in the browser, a page script reports what they
+# do (clicks, typing, submits, navigation) with a human-readable description of each target element.
+# Passwords are never captured.
+
+RECORDER_JS = r"""
+(() => {
+  if (window.__omRecorder) return; window.__omRecorder = true;
+  const label = (el) => {
+    if (!el || !el.tagName) return '';
+    const t = (s) => (s || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const parts = [el.tagName.toLowerCase()];
+    const name = el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || el.getAttribute('name') || el.getAttribute('alt');
+    const text = /^(INPUT|TEXTAREA)$/.test(el.tagName) ? '' : t(el.innerText || '');  // never a field's value
+    if (el.id) parts.push('#' + el.id);
+    if (name) parts.push(`"${t(name)}"`);
+    if (text && text !== name) parts.push(`text="${text.slice(0, 60)}"`);
+    if (el.type && el.tagName === 'INPUT') parts.push(`type=${el.type}`);
+    return parts.join(' ');
+  };
+  const target = (e) => e.target.closest('a,button,input,textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],label,summary') || e.target;
+  const send = (ev) => { try { window.__omRecord(JSON.stringify({ ...ev, url: location.href, title: document.title, t: Date.now() })); } catch (_) {} };
+  document.addEventListener('click', (e) => { const el = target(e); send({ type: 'click', target: label(el), href: el.href || '' }); }, true);
+  document.addEventListener('change', (e) => {
+    const el = e.target, secret = el.type === 'password' || /pass|pwd|token|secret|otp|code/i.test(el.name || el.id || '');
+    const value = el.tagName === 'SELECT' ? (el.selectedOptions[0]?.text || el.value) : el.type === 'checkbox' ? String(el.checked) : el.value;
+    send({ type: 'input', target: label(el), value: secret ? '••••' : String(value).slice(0, 300), secret });
+  }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') send({ type: 'key', key: 'Enter', target: label(e.target) }); }, true);
+  document.addEventListener('submit', (e) => send({ type: 'submit', target: label(e.target) }), true);
+})();
+"""
+
+
+class Recorder:
+    def __init__(self):
+        self.events: list[dict] = []
+        self.active = False
+        self.bound: set[int] = set()
+
+    async def _bind(self, page) -> None:
+        if id(page.context) not in self.bound:
+            self.bound.add(id(page.context))
+            await page.context.expose_binding("__omRecord", lambda src, raw: self._on(raw))
+            await page.context.add_init_script(RECORDER_JS)
+            page.context.on("page", lambda p: p.on("framenavigated", lambda f: self._nav(p, f)))
+            page.on("framenavigated", lambda f: self._nav(page, f))
+        await page.evaluate(RECORDER_JS)
+
+    def _on(self, raw: str) -> None:
+        if self.active:
+            try:
+                self.events.append(__import__("json").loads(raw))
+            except ValueError:
+                pass
+
+    def _nav(self, page, frame) -> None:
+        if self.active and frame == page.main_frame and frame.url not in ("about:blank",):
+            if not self.events or self.events[-1].get("url") != frame.url or self.events[-1]["type"] != "navigate":
+                self.events.append({"type": "navigate", "url": frame.url, "t": int(time.time() * 1000)})
+
+
+recorder = Recorder()
+
+
+class RecordReq(BaseModel):
+    url: str = ""
+
+
+@app.post("/browser/record/start")
+async def record_start(req: RecordReq):
+    async with browser.lock:
+        page = await browser.ensure()
+        recorder.events, recorder.active = [], True
+        await recorder._bind(page)
+        if req.url:
+            try:
+                await page.goto(req.url, timeout=45000, wait_until="domcontentloaded")
+            except Exception as e:  # keep recording: the user can navigate by hand
+                return {"ok": True, "url": page.url, "warning": f"could not open {req.url}: {e}"[:300]}
+    return {"ok": True, "url": page.url}
+
+
+@app.post("/browser/record/stop")
+async def record_stop():
+    recorder.active = False
+    return {"events": recorder.events[-500:], "count": len(recorder.events)}
+
+
+@app.get("/browser/record/events")
+async def record_events():
+    return {"events": recorder.events[-50:], "count": len(recorder.events), "active": recorder.active}
+
+
 # ---------------------------------------------------------------- slides ---
 # An HTML deck is a page of <section class="slide"> elements designed at a fixed size (default
 # 1280x720). Export renders each slide on its own: PNG images (previews and the PPTX), a vector PDF

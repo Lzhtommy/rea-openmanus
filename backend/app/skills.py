@@ -222,7 +222,8 @@ class Skills:
         if name in self.items and not body.get("overwrite"):
             raise SkillError(f"已存在名为「{name}」的技能")
         meta = {"name": name, "description": str(body.get("description") or "").strip().replace("\n", " "),
-                "title": str(body.get("title") or "").strip(), "categories": "、".join(c for c in body.get("categories") or [] if c in CATEGORIES)}
+                "title": str(body.get("title") or "").strip(), "summary": str(body.get("summary") or "").strip().replace("\n", " "),
+                "categories": "、".join(c for c in body.get("categories") or [] if c in CATEGORIES)}
         text = render_front(meta, str(body.get("body") or "").strip() or f"# {meta['title'] or name}\n")
         return self.view(self._write(name, {"SKILL.md": text.encode()}, "personal"), full=True)
 

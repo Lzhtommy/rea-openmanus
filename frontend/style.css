@@ -687,3 +687,19 @@ textarea.code-edit { font: 13px/20px var(--font-mono); min-height: 52vh; }
 .dev-card .sk-desc code { font: 12px var(--font-mono); background: var(--fill-light); padding: 1px 6px; border-radius: 4px; }
 .dev-trust { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); }
 #devnew-status { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---- Computer Use & skill recorder */
+#computeruse { flex: 1; min-height: 0; overflow-y: auto; }
+#rec-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.rec-card { width: min(1180px, 100%); max-height: 94vh; display: flex; flex-direction: column; }
+.rec-card .viewer-head { gap: 10px; }
+.rec-body { overflow: auto; min-height: 300px; }
+.rec-grid { display: grid; grid-template-columns: 1fr 320px; gap: 14px; padding: 14px 18px; }
+.rec-screen { height: 560px; background: #111; border-radius: 10px; overflow: hidden; }
+.rec-screen .pc-empty { color: #ccc; height: 100%; }
+.rec-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rec-events { flex: 1; min-height: 200px; max-height: 360px; overflow: auto; margin: 0; padding: 8px 8px 8px 28px; border: 1px solid var(--border-main); border-radius: 10px; font-size: 12px; line-height: 18px; }
+.rec-events li { margin-bottom: 4px; word-break: break-all; }
+.rec-side textarea { font: 13px/20px var(--font); padding: 8px 10px; border: 1px solid var(--border-dark); border-radius: 8px; background: var(--bg-white); color: var(--text-primary); resize: vertical; }
+.rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; margin-right: 6px; animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }

@@ -922,3 +922,30 @@ async def test_device_tunnel(store, monkeypatch, tmp_path):
     devices.store.detach(d["id"], live)
     with pytest.raises(Exception):
         await manager.sandboxes[s.sandbox_id].call("/shell/view", {"id": "default"})  # offline now
+
+
+@pytest.mark.asyncio
+async def test_skill_recorder(store, monkeypatch, tmp_path):
+    """Demonstrated browser steps (minus secrets) reach the model, which drafts a skill; the browser is cleaned up."""
+    from app import main, recordings
+    recordings.store = recordings.Recordings()
+    page = tmp_path / "form.html"
+    page.write_text("<title>t</title><input name=q placeholder='关键词'><input type=password name=pw><button>搜索</button>")
+    seen = {}
+
+    async def fake_draft(steps, notes, profile=None):
+        seen.update(steps=steps, notes=notes)
+        return {"name": "search-flow", "title": "搜索流程", "description": "MUST read before searching.", "summary": "s",
+                "categories": ["自动化"], "body": "1. 打开页面"}
+    monkeypatch.setattr(llm, "draft_recorded_skill", fake_draft)
+    r = await main.start_recording({"target": "cloud", "url": f"file://{page}"})
+    sb = manager.sandboxes[f"rec-{r['id']}"]
+    await sb.call("/browser/view")
+    await sb.call("/browser/input", {"index": 0, "text": "无人机", "press_enter": False})
+    await sb.call("/browser/input", {"index": 1, "text": "s3cret", "press_enter": False})
+    await sb.call("/browser/click", {"index": 2})
+    assert (await main.recording_events(r["id"]))["count"] >= 3
+    out = await main.stop_recording(r["id"], {"notes": "每次搜索不同的关键词"})
+    assert out["draft"]["name"] == "search-flow" and "每次搜索" in seen["notes"]
+    assert "无人机" in seen["steps"] and "s3cret" not in seen["steps"] and "<secret" in seen["steps"]
+    assert f"rec-{r['id']}" not in manager.sandboxes  # the recording browser is gone

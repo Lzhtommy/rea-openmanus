@@ -63,6 +63,7 @@ const ICONS = {
   sparkBox: '<rect width="18" height="18" x="3" y="3" rx="4"/><path d="M12 7.5l1.2 3.3 3.3 1.2-3.3 1.2L12 16.5l-1.2-3.3L7.5 12l3.3-1.2z"/>',
   gamepad: '<path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><rect width="20" height="12" x="2" y="6" rx="6"/>',
   phone: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>',
+  record: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
   laptop: '<rect width="18" height="12" x="3" y="4" rx="2"/><path d="M2 20h20"/>',
   presentation: '<path d="M2 3h20M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3M7 21l5-5 5 5"/>',
   film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M3 12h18M3 16.5h4M17 7.5h4M17 16.5h4"/>',
@@ -141,7 +142,7 @@ const S = {
   personal: { profile: {}, instructions: "", knowledge: [] }, persTab: "profile", editingKnow: null,
   plugins: { plugins: [], categories: [] }, plugCat: "all", plugOpen: null, sites: [], crTab: "all",
   pcs: { computers: [], templates: [], unavailable: [], tasks: {} }, pcOpen: null, pcTab: "desktop", target: null,
-  devs: { devices: [], tasks: {} }, pairing: null,
+  devs: { devices: [], tasks: {} }, pairing: null, rec: null,
   triggers: [], activity: [], autoTab: "activity", editingTrig: null,
   skills: { skills: [], catalog: [], categories: [] }, skTab: "explore", skCat: "all", skSrc: "all", pickedSkills: [], skillView: null,
 };
@@ -264,8 +265,9 @@ function scheduleRender(scrollEnd = false) {
 
 function renderAll() {
   const auto = S.view === "automations", conn = S.view === "connectors", plug = S.view === "plugins", cr = S.view === "creations", pcv = S.view === "computers";
-  const proj = S.view === "project", pers = S.view === "personal", sk = S.view === "skills";
-  const lib = S.view === "library" || auto || conn || proj || pers || sk || plug || cr || pcv; // full-page views without a composer dock
+  const proj = S.view === "project", pers = S.view === "personal", sk = S.view === "skills", cu = S.view === "computeruse";
+  const lib = S.view === "library" || auto || conn || proj || pers || sk || plug || cr || pcv || cu; // full-page views without a composer dock
+  $("#computeruse").classList.toggle("hidden", !cu);
   $("#computers").classList.toggle("hidden", !pcv);
   $("#nav-pc").classList.toggle("active", pcv);
   $("#creations").classList.toggle("hidden", !cr);
@@ -273,7 +275,7 @@ function renderAll() {
   $("#plugins").classList.toggle("hidden", !plug);
   $("#personal").classList.toggle("hidden", !pers);
   $("#skills").classList.toggle("hidden", !sk);
-  $("#nav-more").classList.toggle("active", pers || sk);
+  $("#nav-more").classList.toggle("active", pers || sk || cu);
   $("#project-view").classList.toggle("hidden", !proj);
   const home = !S.current && !lib;
   $("#home").classList.toggle("hidden", !home);
@@ -286,8 +288,8 @@ function renderAll() {
   $("#dock").classList.toggle("hidden", home || lib);
   $("#nav-library").classList.toggle("active", S.view === "library");
   (proj ? $("#proj-slot") : home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  $("#composer").classList.toggle("hidden", pers || sk || plug || conn || cr || pcv);
-  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : sk ? "技能" : plug ? "插件" : cr ? "创作" : pcv ? "电脑" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  $("#composer").classList.toggle("hidden", pers || sk || plug || conn || cr || pcv || cu);
+  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : cu ? "Computer Use" : sk ? "技能" : plug ? "插件" : cr ? "创作" : pcv ? "电脑" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   const meta = S.current && S.sessions.find((x) => x.id === S.current);
   const pcName = (meta?.computerId && (S.pcs.computers.find((c) => c.id === meta.computerId)?.name || "云电脑")) ||
@@ -305,6 +307,7 @@ function renderAll() {
   if (proj) { renderProject(); renderPanel(); return; }
   if (pers) { renderPersonal(); renderPanel(); return; }
   if (sk) { renderSkills(); renderPanel(); return; }
+  if (cu) { renderPanel(); return; }
   if (lib) { renderLibrary(); renderPanel(); return; }
   if (home) { renderPanel(); return; }
 
@@ -984,6 +987,101 @@ async function pcCall(op) {
   pcVncClose(); await loadComputers();
 }
 function newTaskOn(id) { closePcView(); goHome(); S.target = id; renderAttachments(); $("#input").focus(); }
+
+function openComputerUse() {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "computeruse";
+  history.replaceState(null, "", "#computeruse");
+  renderSessions(); hydrateIcons($("#computeruse")); scheduleRender();
+}
+
+// ---- skill recorder (技能录制器)
+let recRfb = null, recPoll = null;
+function openRecorder() {
+  S.rec = { step: "setup", target: "cloud", url: "", events: [], notes: "" };
+  loadComputers().then(renderRecorder);
+  $("#rec-modal").classList.remove("hidden");
+  renderRecorder();
+}
+function closeRecorder() {
+  if (S.rec?.id && S.rec.step === "recording") fetch(`/api/recordings/${S.rec.id}`, { method: "DELETE" });
+  clearInterval(recPoll); if (recRfb) { try { recRfb.disconnect(); } catch { /* closed */ } recRfb = null; }
+  S.rec = null; $("#rec-modal").classList.add("hidden");
+}
+const recEvText = (e) => ({ navigate: `打开 ${e.url}`, click: `点击 ${e.target}`, input: `填写 ${e.target} = ${e.value}`, key: `按 ${e.key}`, submit: `提交 ${e.target}` }[e.type] || e.type);
+function renderRecorder() {
+  const r = S.rec; if (!r) return;
+  const body = $("#rec-body"), act = $("#rec-actions");
+  if (r.step === "setup") {
+    const devs = S.devs.devices.filter((d) => d.online);
+    $("#rec-sub").textContent = "在浏览器里演示一遍工作流，OpenManus 会把它整理成技能";
+    body.innerHTML = `<div class="sched-body"><label>在哪里演示<select id="rec-target"><option value="cloud">云端浏览器（在下方画面中直接操作）</option>${devs.map((d) => `<option value="dev:${esc(d.id)}">${esc(d.name)}${d.myBrowser ? " · 你的 Chrome" : ""}</option>`).join("")}</select></label>` +
+      `<label>起始网址<input id="rec-url" placeholder="例如 https://oa.example.com" value="${esc(r.url)}" /></label>` +
+      `<div class="muted" style="font-size:12px">录制会记下你打开的页面、点击的元素和填写的内容（密码等敏感字段只记“需要询问用户”，不记内容）。</div><div class="sched-err" id="rec-err"></div></div>`;
+    act.innerHTML = `<span class="spacer"></span><button class="btn ghost" data-rec="close">取消</button><button class="btn primary" data-rec="start">${icon("record")}开始录制</button>`;
+  } else if (r.step === "recording") {
+    $("#rec-sub").innerHTML = `<span class="rec-dot"></span>正在录制 · 已记录 ${r.count || 0} 步`;
+    if (!$("#rec-live")) {
+      body.innerHTML = `<div class="rec-grid"><div class="rec-screen" id="rec-screen">${r.target === "cloud" ? "" : `<div class="pc-empty">${icon("compass")}<span>请在「${esc(S.devs.devices.find((d) => "dev:" + d.id === r.target)?.name || "你的电脑")}」的 Chrome 中操作；操作会实时记录在右侧</span></div>`}</div>` +
+        `<div class="rec-side"><div class="mcp-label">已记录的操作</div><ol class="rec-events" id="rec-live"></ol><div class="mcp-label">补充说明（可选）</div><textarea id="rec-notes" rows="4" placeholder="例如：每次的日期和金额都不同；最后一步提交前先让我确认">${esc(r.notes)}</textarea></div></div>`;
+      if (r.target === "cloud") (async () => {
+        try { RFB = RFB || (await import(NOVNC)).default; } catch { return; }
+        if (!S.rec || S.rec.id !== r.id) return;
+        recRfb = new RFB($("#rec-screen"), `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/recordings/${r.id}/vnc`, { wsProtocols: ["binary"] });
+        recRfb.scaleViewport = true; recRfb.background = "transparent";
+      })();
+    }
+    $("#rec-live").innerHTML = r.events.map((e) => `<li>${esc(recEvText(e))}</li>`).join("") || `<li class="muted">在左侧浏览器中开始操作…</li>`;
+    $("#rec-live").scrollTop = 1e9;
+    act.innerHTML = `<span class="sched-err" id="rec-err"></span><span class="spacer"></span><button class="btn ghost" data-rec="close">放弃</button><button class="btn primary" data-rec="stop">停止并生成技能</button>`;
+  } else if (r.step === "drafting") {
+    body.innerHTML = `<div class="pc-empty" style="height:360px"><span class="spin">${icon("loader")}</span><span>正在把 ${r.count || 0} 步操作整理成技能…</span></div>`;
+    act.innerHTML = "";
+  } else {
+    const d = r.draft;
+    $("#rec-sub").textContent = "检查并修改技能草稿，保存后即可在任务中使用";
+    body.innerHTML = `<form class="sched-body" id="rec-draft"><div class="sched-row"><label>显示名称<input name="title" value="${esc(d.title)}" /></label><label>标识<input name="name" value="${esc(d.name)}" /></label></div>` +
+      `<label>何时使用<input name="description" value="${esc(d.description)}" /></label><label>简介<input name="summary" value="${esc(d.summary)}" /></label>` +
+      `<label>操作说明<textarea name="body" rows="14" class="code-edit" style="min-height:300px">${esc(d.body)}</textarea></label><div class="sched-err" id="rec-err"></div></form>`;
+    act.innerHTML = `<span class="spacer"></span><button class="btn ghost" data-rec="close">放弃</button><button class="btn primary" data-rec="save">保存为技能</button>`;
+  }
+}
+async function recAction(op) {
+  const r = S.rec; if (!r) return;
+  const err = (m) => { const n = $("#rec-err"); if (n) n.textContent = m; };
+  if (op === "close") return closeRecorder();
+  if (op === "start") {
+    r.target = $("#rec-target").value; r.url = $("#rec-url").value.trim();
+    const res = await fetch("/api/recordings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ target: r.target, url: r.url }) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) return err(j.detail || "无法开始录制");
+    Object.assign(r, { id: j.id, step: "recording" });
+    $("#rec-body").innerHTML = ""; renderRecorder();
+    recPoll = setInterval(async () => {
+      if (!S.rec || S.rec.step !== "recording") return clearInterval(recPoll);
+      const x = await fetch(`/api/recordings/${r.id}/events`).then((q) => q.json()).catch(() => null);
+      if (x?.events) { r.events = x.events; r.count = x.count; r.notes = $("#rec-notes")?.value ?? r.notes; renderRecorder(); }
+    }, 1500);
+  }
+  if (op === "stop") {
+    r.notes = $("#rec-notes")?.value || ""; clearInterval(recPoll);
+    if (recRfb) { try { recRfb.disconnect(); } catch { /* closed */ } recRfb = null; }
+    r.step = "drafting"; renderRecorder();
+    const res = await fetch(`/api/recordings/${r.id}/stop`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: r.notes }) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { r.step = "setup"; renderRecorder(); return err(j.detail || "生成失败"); }
+    r.draft = j.draft; r.step = "review"; renderRecorder();
+  }
+  if (op === "save") {
+    const f = $("#rec-draft");
+    const res = await fetch("/api/skills", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: f.name.value, title: f.title.value, description: f.description.value, summary: f.summary.value, body: f.body.value, categories: r.draft.categories || [] }) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) return err(j.detail || "保存失败");
+    S.rec = null; $("#rec-modal").classList.add("hidden");
+    await openSkills("mine"); openSkill(j.name);
+  }
+}
 
 // ---- devices (连接您的设备)
 async function startPairing() {
@@ -1939,7 +2037,14 @@ function bind() {
   };
   $("#nav-auto").onclick = openAutomations;
   $("#nav-more").onclick = (e) => { e.stopPropagation(); $("#more-menu").classList.toggle("hidden"); };
-  $("#more-menu").onclick = (e) => { const b = e.target.closest("[data-goto-view]"); if (!b) return; $("#more-menu").classList.add("hidden"); if (b.dataset.gotoView === "personal") openPersonal(); if (b.dataset.gotoView === "skills") openSkills(); };
+  $("#more-menu").onclick = (e) => { const b = e.target.closest("[data-goto-view]"); if (!b) return; $("#more-menu").classList.add("hidden"); if (b.dataset.gotoView === "personal") openPersonal(); if (b.dataset.gotoView === "skills") openSkills(); if (b.dataset.gotoView === "computeruse") openComputerUse(); };
+  $("#rec-close").onclick = closeRecorder;
+  $("#rec-actions").onclick = (e) => { const b = e.target.closest("[data-rec]"); if (b) recAction(b.dataset.rec); };
+  $("#computeruse").onclick = (e) => {
+    const c = e.target.closest("[data-cu]"); if (!c) return;
+    if (c.dataset.cu === "record") return openRecorder();
+    openComputers().then(() => startPairing().then(() => { if (c.dataset.cu === "browser") { S.pairing.myBrowser = true; renderPairing(); } }));
+  };
   $("#sk-tabs").onclick = (e) => { const b = e.target.closest("[data-sktab]"); if (b) { S.skTab = b.dataset.sktab; renderSkills(); } };
   $("#sk-mine").onclick = () => { S.skTab = "mine"; renderSkills(); };
   $("#sk-cats").onclick = (e) => { const b = e.target.closest("[data-skcat],[data-sksrc]"); if (!b) return; if (b.dataset.skcat) S.skCat = b.dataset.skcat; else S.skSrc = b.dataset.sksrc; renderSkills(); };
@@ -1948,6 +2053,7 @@ function bind() {
   $("#sk-create-menu").onclick = (e) => {
     const b = e.target.closest("[data-sk-new]"); if (!b) return;
     $("#sk-create-menu").classList.add("hidden");
+    if (b.dataset.skNew === "record") return openRecorder();
     if (b.dataset.skNew === "agent") { goHome(); S.pickedSkills = ["skill-creator"]; renderAttachments(); $("#input").value = "帮我创建一个技能："; autoGrow(); renderComposerState(); $("#input").focus(); return; }
     openSkillNew(b.dataset.skNew);
   };
@@ -2151,6 +2257,7 @@ async function deleteSession(sid) {
   else if (sid === "plugins") openPlugins();
   else if (sid === "creations") openCreations();
   else if (sid === "computers") openComputers();
+  else if (sid === "computeruse") openComputerUse();
   else if (sid === "personal") openPersonal();
   else if (sid === "skills") openSkills();
   else if (sid.startsWith("project/")) openProject(sid.slice(8));

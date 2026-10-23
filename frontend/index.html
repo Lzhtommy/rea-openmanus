@@ -28,6 +28,7 @@
         <button class="nav-item" id="nav-conn"><span class="nav-ico" data-icon="puzzle"></span><span class="nav-label">插件</span></button>
         <div class="more-wrap"><button class="nav-item" id="nav-more"><span class="nav-ico" data-icon="more"></span><span class="nav-label">更多</span></button>
           <div class="more-menu hidden" id="more-menu">
+            <button class="mode-item" data-goto-view="computeruse"><span data-icon="laptop"></span>Computer Use</button>
             <button class="mode-item" data-goto-view="skills"><span data-icon="spark"></span>技能</button>
             <button class="mode-item" data-goto-view="personal"><span data-icon="user"></span>个性化</button>
           </div></div>
@@ -100,6 +101,18 @@
         </div>
       </div>
 
+      <div id="computeruse" class="hidden">
+        <div class="lib-inner wide">
+          <div class="lib-head"><h2>Computer Use</h2></div>
+          <p class="auto-intro">让 OpenManus 使用你自己的电脑和浏览器，并从你的操作中学习工作流程。</p>
+          <div class="sk-grid">
+            <div class="sk-card" data-cu="device"><div class="sk-top"><span class="auto-ico" data-icon="laptop"></span><div class="sk-title">此计算机上的 OpenManus<div class="sk-name">连接设备</div></div></div><div class="sk-desc">让 OpenManus 在你的电脑上执行命令、处理本地文件。每一步操作都会先征求你的同意。</div></div>
+            <div class="sk-card" data-cu="browser"><div class="sk-top"><span class="auto-ico" data-icon="compass"></span><div class="sk-title">My Browser<div class="sk-name">使用你自己的 Chrome</div></div></div><div class="sk-desc">让 OpenManus 在你自己的浏览器中工作，沿用你已登录的网站。</div></div>
+            <div class="sk-card" data-cu="record"><div class="sk-top"><span class="auto-ico" data-icon="record"></span><div class="sk-title">技能录制器<div class="sk-name">录制 → 技能</div></div></div><div class="sk-desc">在浏览器里演示一遍工作流，OpenManus 把它整理成可重复使用的技能。</div></div>
+          </div>
+        </div>
+      </div>
+
       <div id="computers" class="hidden">
         <div class="lib-inner wide">
           <div class="lib-head"><h2>电脑</h2><button class="btn primary" id="pc-new">创建云电脑</button></div>
@@ -146,6 +159,7 @@
                 <button class="mode-item" data-sk-new="write"><span data-icon="pencil"></span>手动编写</button>
                 <label class="mode-item"><span data-icon="upload"></span>上传技能<input type="file" id="sk-upload" accept=".md,.zip" hidden /></label>
                 <button class="mode-item" data-sk-new="github"><span data-icon="github"></span>从 GitHub 导入技能</button>
+                <button class="mode-item" data-sk-new="record"><span data-icon="record"></span>录制工作流</button>
               </div></div></div></div>
           <div class="lib-tabs" id="sk-tabs"></div>
           <div class="lib-tabs sub" id="sk-cats"></div>
@@ -299,6 +313,14 @@
       </div>
       <div class="cc-actions"><button type="button" class="btn ghost" id="pcnew-cancel">取消</button><button type="submit" class="btn primary">创建</button></div>
     </form>
+  </div>
+
+  <div id="rec-modal" class="hidden">
+    <div class="sched-card rec-card">
+      <div class="viewer-head"><span class="auto-ico" data-icon="record"></span><div class="viewer-title"><div style="font-size:16px;font-weight:500">技能录制器</div><div class="muted" id="rec-sub" style="font-size:12px"></div></div><button type="button" class="icon-btn" id="rec-close" data-icon="x"></button></div>
+      <div class="rec-body" id="rec-body"></div>
+      <div class="cc-actions" id="rec-actions"></div>
+    </div>
   </div>
 
   <div id="devnew-modal" class="hidden">

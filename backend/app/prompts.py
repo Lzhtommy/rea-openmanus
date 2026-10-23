@@ -242,6 +242,28 @@ AUTOMATION_SCHEMA = {
     "additionalProperties": False,
 }
 
+RECORD_PROMPT = """\
+You turn a recorded browser workflow into an agent skill: instructions another AI agent with a browser will \
+follow to repeat the task on its own. You get the user's actions (pages opened, elements clicked, values \
+typed) and the user's notes. Generalize: replace values that will differ next time (names, dates, amounts, \
+search terms) with parameters the agent should get from the user's request, keep fixed values (URLs, menu \
+names) as they are, and drop accidental clicks. Write the body as numbered steps in the language of the \
+user's notes (default Chinese), naming elements by their visible text, with what to check after key steps, \
+which inputs to ask the user for (secrets are never stored: ask for them), and when to stop and confirm \
+before submitting anything irreversible. `name`: lowercase letters, digits and hyphens. `description`: one \
+sentence starting "MUST read before ..." saying when to use it. `title`: a short display name. `summary`: \
+one sentence for the user. `categories`: one or two of 编程、数据、自动化、商业、设计、媒体、内容、应用.
+"""
+
+RECORD_SCHEMA = {
+    "type": "object",
+    "properties": {"name": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"},
+                   "summary": {"type": "string"}, "categories": {"type": "array", "items": {"type": "string"}},
+                   "body": {"type": "string"}},
+    "required": ["name", "title", "description", "summary", "categories", "body"],
+    "additionalProperties": False,
+}
+
 SUBAGENT_BRIEF = """\
 You are a sub-agent spawned by a parent agent for ONE item of a parallel map-reduce job. \
 You share the parent's sandbox (files you write are visible to the parent).

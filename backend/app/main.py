@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import computers, config, connectors, devices, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import computers, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI):
     sites.store = sites.Sites()
     computers.store = computers.Computers()
     devices.store = devices.Devices()
+    recordings.store = recordings.Recordings()
     asyncio.create_task(computers.store.resume())
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
@@ -292,6 +293,58 @@ async def skill_from_session(body: dict):
         return await skills.store.from_sandbox(await manager.get(s.sandbox_id), path)
     except skills.SkillError as e:
         raise HTTPException(400, str(e))
+
+
+# ------------------------------------------------------------- skill recorder (技能录制器) ---
+
+def _recording(rid: str) -> dict:
+    r = recordings.store.items.get(rid)
+    if not r:
+        raise HTTPException(404, "recording not found")
+    return r
+
+
+@app.post("/api/recordings")
+async def start_recording(body: dict):
+    """Start recording in a cloud browser ("cloud") or the user's own browser on a device ("dev:<id>")."""
+    from .sandbox import SandboxError
+    target = str(body.get("target") or "cloud")
+    if target.startswith("dev:") and target[4:] not in devices.store.items:
+        raise HTTPException(404, "device not found")
+    try:
+        return await recordings.store.start(target, str(body.get("url") or "").strip())
+    except SandboxError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/recordings/{rid}/events")
+async def recording_events(rid: str):
+    _recording(rid)
+    try:
+        return await recordings.store.events(rid)
+    except (recordings.RecordingError, httpx.HTTPError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/recordings/{rid}/stop")
+async def stop_recording(rid: str, body: dict | None = None):
+    _recording(rid)
+    try:
+        return await recordings.store.stop(rid, str((body or {}).get("notes") or ""))
+    except recordings.RecordingError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/recordings/{rid}")
+async def cancel_recording(rid: str):
+    await recordings.store.cancel(rid)
+    return {"ok": True}
+
+
+@app.websocket("/api/recordings/{rid}/vnc")
+async def recording_vnc(websocket: WebSocket, rid: str):
+    r = recordings.store.items.get(rid)
+    await _relay_vnc(websocket, manager.sandboxes.get(recordings.store.sandbox_id(r)) if r else None)
 
 
 # ------------------------------------------------------------- personalization (个性化) ---

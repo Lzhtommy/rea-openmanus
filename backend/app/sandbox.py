@@ -154,9 +154,10 @@ class SandboxManager:
         env = {**os.environ, "SANDBOX_WORKSPACE": str(ws), "SANDBOX_PORT": str(port), "SANDBOX_HOST": "127.0.0.1"}
         sandbox_python = config.SANDBOX_DIR / ".venv" / "bin" / "python"
         python = str(sandbox_python) if sandbox_python.exists() else sys.executable
+        logf = open(config.WORKSPACES_DIR / f"{sid}.log", "ab")  # outside the workspace the agent sees
         proc = await asyncio.create_subprocess_exec(
-            python, str(config.SANDBOX_DIR / "server.py"), cwd=str(ws), env=env,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            python, str(config.SANDBOX_DIR / "server.py"), cwd=str(ws), env=env, stdout=logf, stderr=logf)
+        logf.close()
         self.local_procs[sid] = proc
         sb = Sandbox(sid, f"http://127.0.0.1:{port}", str(ws), "local")
         await sb.wait_ready()
