@@ -206,6 +206,7 @@ webdev 全栈托管（自定义域名、Stripe 等）、Connectors 和 MCP 市�
 | 资料库分类：全部 / 文本和 PDF / 幻灯片 / 表格 / 图片 / 视频 / 音频 / 其他 | 同名分类（前端按扩展名归类） |
 | 自动化 → 触发器（事件 → 动作、自定义条件）、高级自动化（Beta）、`tab=updates` 动态 | `triggers.py`：webhook（`/api/hooks/<token>`，每 5 秒限一次）与条件触发（`watcher` 角色的只读 Agent，在独立沙箱 `watch-<id>` 里查证，需确认的操作一律拒绝，结果为 `{met, summary, state}`）；`/api/automations/parse` 把自然语言解析成定时任务或触发器；`/api/automations/activity` 汇总运行与检查 |
 | `/app/plugins` 插件目录（分类、管理连接器、创建） | `plugins.py`：连接器模板 + 需要填写的字段，安装即生成带 `plugin` 标记的普通连接器；`connectors.mask_url` 隐藏 URL 中的密钥；中文名连接器使用唯一前缀，避免工具限定名冲突 |
+| `slides` / `media_viewer` 工具类别，"创建幻灯片、图片和视频" | `slides` 技能 + `slides_export`（沙箱 `/slides/export`：逐页截图、打印 CSS 生成矢量 PDF、python-pptx 生成 PPTX）；`media.py` 经网关生成图片（images API，带参考图时走 chat 图像输出）、语音（audio.speech）、视频（`/v1/videos` 创建、轮询、下载） |
 | `ScheduledTask` / 自动化 | `scheduler.py`（once/interval/daily/weekly），`/api/schedules`、`schedule_create` 工具、"自动化"页面 |
 这些都是在同一个 Agent 内核上叠加的业务功能，事件协议里已预留扩展点（`toolUsed.tool` 新增类别即可）。
 

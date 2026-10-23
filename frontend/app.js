@@ -60,6 +60,9 @@ const ICONS = {
   spark: '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
   github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.1-1.3-.3-2.5-1-3.5.3-1.2.3-2.4 0-3.5 0 0-1 0-3 1.5-2.6-.5-5.4-.5-8 0C6 2 5 2 5 2c-.3 1.1-.3 2.3 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.4.5-.7 1-.8 1.6-.2.6-.3 1.3-.2 1.9v4"/><path d="M9 18c-4.5 2-5-2-7-2"/>',
+  presentation: '<path d="M2 3h20M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3M7 21l5-5 5 5"/>',
+  film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M3 12h18M3 16.5h4M17 7.5h4M17 16.5h4"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   puzzle: '<path d="M19.4 11H18V7a2 2 0 0 0-2-2h-4V3.6a2.1 2.1 0 1 0-4 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.7 2.7 0 0 1 0 5.4H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.7 2.7 0 0 1 5.4 0V22H17a2 2 0 0 0 2-2v-4h1.4a2.5 2.5 0 0 0 0-5z"/>',
   chevLeft: '<path d="m15 18-6-6 6-6"/>',
   zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
@@ -109,10 +112,13 @@ const TOOL = {
   schedule: { icon: "clock", use: "自动化" },
   mcp: { icon: "plug", use: "连接器" },
   knowledge: { icon: "brain", use: "知识" },
+  slides: { icon: "presentation", use: "幻灯片" },
+  media: { icon: "image", use: "生成工具" },
 };
 const ACTION_ZH = {
   "Executing command": "执行命令", "Checking terminal": "查看终端", Browsing: "浏览", Typing: "输入", Clicking: "点击",
   "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务", "Searching tools": "搜索工具", "Using MCP": "调用工具", "Saving knowledge": "提议记住", "Searching images": "搜索图片", "Searching papers": "搜索论文",
+  "Exporting slides": "渲染幻灯片", "Generating image": "生成图片", "Generating speech": "生成语音", "Generating video": "生成视频",
   Searching: "搜索", "Reading webpage": "提取网页", "Running parallel sub-agents": "并行执行子任务", "Exposing port": "部署预览",
 };
 const zh = (a) => ACTION_ZH[a] || a || "";
@@ -412,6 +418,8 @@ function summarize(steps) {
     else if (n.startsWith("deploy_")) c.dep++;
     else if (n.startsWith("schedule_")) c.sched = (c.sched || 0) + 1;
     else if (n === "trigger_create") c.trig = (c.trig || 0) + 1;
+    else if (n === "slides_export") c.sl = (c.sl || 0) + 1;
+    else if (n.startsWith("media_generate_")) c.gen = (c.gen || 0) + 1;
     else if (n === "mcp_search_tools") c.ts = (c.ts || 0) + 1;
     else if (n === "mcp_call_tool") c.tc = (c.tc || 0) + 1;
     else if (n === "knowledge_save") c.kn = (c.kn || 0) + 1;
@@ -431,6 +439,8 @@ function summarize(steps) {
   if (c.dep) parts.push(`部署了 ${c.dep} 个服务`);
   if (c.sched) parts.push(`创建了 ${c.sched} 个定时任务`);
   if (c.trig) parts.push(`创建了 ${c.trig} 个触发器`);
+  if (c.sl) parts.push(`渲染了 ${c.sl} 次幻灯片`);
+  if (c.gen) parts.push(`生成了 ${c.gen} 个媒体文件`);
   if (c.ts) parts.push(`搜索了 ${c.ts} 次工具`);
   if (c.tc) parts.push(`调用了 ${c.tc} 次连接器工具`);
   if (c.kn) parts.push(`提议记住 ${c.kn} 条知识`);
@@ -486,6 +496,9 @@ function fileIconCls(name) {
   if (e === "pdf") return ["fileDoc", "pdf"];
   if (IMG.has(e)) return ["image", "img"];
   if (["csv", "xlsx", "xls"].includes(e)) return ["fileDoc", "sheet"];
+  if (["pptx", "ppt", "key"].includes(e)) return ["presentation", "slides"];
+  if (["mp4", "webm", "mov"].includes(e)) return ["film", "video"];
+  if (["mp3", "wav", "m4a", "ogg"].includes(e)) return ["music", "audio"];
   if (["py", "js", "ts", "html", "css", "json", "sh"].includes(e)) return ["code", "code"];
   return ["fileDoc", ""];
 }
@@ -648,12 +661,30 @@ function stepView(s) {
   if (d.mcp) return `<div class="file-head">${icon("plug")}<span class="grow">${esc(d.mcp.server)} · ${esc(d.mcp.action)}</span></div>` +
     `<div class="page-md"><div class="mcp-label">参数</div><pre class="cc-cmd">${esc(d.mcp.argumentsPreview)}</pre><div class="mcp-label">结果</div><pre class="cc-cmd mcp-out">${esc(d.mcp.resultPreview)}</pre></div>`;
   if (d.knowledge) return `<div class="mr">${knowCardHtml(d.knowledge)}</div>`;
+  if (d.slides) return slidesViewHtml(s);
+  if (d.media) {
+    const m = d.media;
+    const player = m.kind === "image" ? `<img class="shot" src="${esc(m.url)}" alt="" />` : m.kind === "video" ? `<video class="media-player" src="${esc(m.url)}" controls></video>` : `<div class="audio-wrap">${icon("music")}<audio src="${esc(m.url)}" controls></audio></div>`;
+    return `<div class="file-head">${icon(m.kind === "video" ? "film" : m.kind === "audio" ? "music" : "image")}<span class="grow">${esc(m.path)}</span><a class="icon-btn sm" href="${esc(m.url)}" download title="下载">${icon("download")}</a></div>` +
+      `<div class="media-view">${player}${m.prompt ? `<div class="media-prompt">${esc(m.prompt)}</div>` : ""}</div>`;
+  }
   if (d.trigger) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${trigCardHtml(d.trigger, false)}</div></div>`;
   if (d.schedule) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${autoCardHtml(d.schedule, false)}</div></div>`;
   if (d.deploy) return `<div class="urlbar">${icon("globe")}<a href="${esc(d.deploy.url)}" target="_blank">${esc(d.deploy.url)}</a></div><iframe class="preview-frame" style="height:calc(100% - 37px)" src="${esc(d.deploy.url)}"></iframe>`;
   if (d.error) return `<div class="err-view"><div class="term">${esc(d.error)}</div></div>`;
   if (s.status === "start" || s.status === "running") return `<div class="pc-empty"><span class="shimmer">${esc(s.brief || zh(s.message?.action))}</span></div>`;
   return `<div class="err-view"><div class="term" style="color:var(--text-secondary);background:var(--bg-code)">${esc(JSON.stringify(s.args || {}, null, 2))}</div></div>`;
+}
+
+// Manus-style slide viewer: the current slide large, a strip of thumbnails, and the exported files.
+function slidesViewHtml(s) {
+  const d = s.detail.slides, i = Math.min(S.slideIdx?.[s.actionId] || 0, d.count - 1), cur = d.slides[i] || {};
+  const nav = (n, ic, dis) => `<button class="icon-btn sm" data-act="slide" data-id="${esc(s.actionId)}" data-i="${n}" ${dis ? "disabled" : ""}>${icon(ic)}</button>`;
+  return `<div class="file-head">${icon("presentation")}<span class="grow">${esc(basename(d.file))} · ${d.count} 页</span>` +
+    (d.pdf ? `<a class="btn ghost sm" href="${esc(d.pdf.url)}" download>PDF</a>` : "") + (d.pptx ? `<a class="btn ghost sm" href="${esc(d.pptx.url)}" download>PPTX</a>` : "") + `</div>` +
+    `<div class="slide-view"><div class="slide-main">${cur.thumb ? `<img src="${esc(cur.thumb)}" alt="" />` : ""}</div>` +
+    `<div class="slide-nav">${nav(i - 1, "chevLeft", i === 0)}<span>${i + 1} / ${d.count}${cur.title ? ` · ${esc(cur.title)}` : ""}</span>${nav(i + 1, "chevRight", i >= d.count - 1)}</div>` +
+    `<div class="slide-strip">${d.slides.map((x, k) => `<button class="${k === i ? "on" : ""}" data-act="slide" data-id="${esc(s.actionId)}" data-i="${k}"><img src="${esc(x.thumb)}" alt="" loading="lazy" /></button>`).join("")}</div></div>`;
 }
 
 function termHtml(t) {
@@ -680,6 +711,8 @@ async function renderFileBody(f, body = $("#file-body"), still = () => S.panel.f
   const e = ext(f.name);
   if (IMG.has(e)) { body.innerHTML = `<img class="shot" src="${esc(f.url)}" alt="" />`; return; }
   if (e === "pdf") { body.innerHTML = `<iframe class="preview-frame" style="height:calc(100vh - 240px)" src="${esc(f.url)}"></iframe>`; return; }
+  if (["mp4", "webm", "mov"].includes(e)) { body.innerHTML = `<div class="media-view"><video class="media-player" src="${esc(f.url)}" controls></video></div>`; return; }
+  if (["mp3", "wav", "m4a", "ogg"].includes(e)) { body.innerHTML = `<div class="media-view"><div class="audio-wrap">${icon("music")}<audio src="${esc(f.url)}" controls></audio></div></div>`; return; }
   if (!TEXTY.has(e)) { body.innerHTML = `<div class="pc-empty" style="height:300px">${icon("fileDoc")}<span>该文件无法预览，<a href="${esc(f.url)}" download>点击下载</a></span></div>`; return; }
   const text = await fetchText(f.url);
   if (!still()) return;
@@ -1776,6 +1809,7 @@ function bind() {
       case "plan": e.stopPropagation(); S.planOpen = !S.planOpen; renderTaskbar(); return;
       case "takeover": if (!S.readonly) toggleTakeover(); break;
       case "know": if (!S.readonly) knowAction(a.dataset.op, a.dataset.id); break;
+      case "slide": { S.slideIdx = { ...(S.slideIdx || {}), [a.dataset.id]: +a.dataset.i }; renderPanel(); break; }
       case "add-skill": {
         e.stopPropagation();
         if (S.readonly) break;

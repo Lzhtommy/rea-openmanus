@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from . import config, connectors, llm, providers
+from . import config, connectors, llm, media, providers
 from .prompts import SUBAGENT_BRIEF
 from .sandbox import Sandbox, SandboxError
 from .search import search_images, search_scholar, search_web
@@ -424,6 +424,28 @@ class Agent:
                                {"webpageExtract": {"url": r["url"], "title": r["title"],
                                                    "markdown": r["text"][:20000], "truncated": r["truncated"]}})
 
+        # ---- slides and generated media
+        if name == "slides_export":
+            r = await sb.call("/slides/export", {"file": a["file"], "formats": a.get("formats") or ["pdf", "pptx"]})
+            thumbs = [host.save_shot(t) for t in r["thumbnails"]] if self.role == "main" else []
+            outputs = [p for p in (r.get("pdf"), r.get("pptx")) if p]
+            for p in outputs:
+                await host.keep_file(p, "edited")
+            await host.keep_file(a["file"], "edited")
+            rows = "\n".join(f"{i + 1}. {s['title'] or '(untitled)'} — {s['image']}" for i, s in enumerate(r["slides"]))
+            text = f"Rendered {r['count']} slides:\n{rows}\nExported: {', '.join(outputs) or 'nothing'}."
+            content: str | list = text
+            if config.BROWSER_VISION:  # show the model its slides so it can review them without a browser
+                content = [{"type": "text", "text": text + "\nThe rendered slides follow, in order. Check them for overflow, "
+                            "overlap, empty areas and contrast."}] + [
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": t}} for t in r["thumbnails"][:12]]
+            return ToolOutcome(content,
+                               {"slides": {"file": a["file"], "count": r["count"], "url": host.file_url(a["file"]),
+                                           "slides": [{"title": s["title"], "thumb": t} for s, t in zip(r["slides"], thumbs)],
+                                           **{k: {"path": r[k], "url": host.file_url(r[k])} for k in ("pdf", "pptx") if r.get(k)}}})
+        if name.startswith("media_generate_"):
+            return await self._generate_media(name.removeprefix("media_generate_"), a)
+
         # ---- deploy
         if name == "deploy_expose_port":
             url = host.preview_url(int(a["port"]))
@@ -492,6 +514,43 @@ class Agent:
             return ToolOutcome("Entered standby.", stop=True)
 
         return ToolOutcome(f"Tool {name} is not implemented.", is_error=True)
+
+    async def _generate_media(self, kind: str, a: dict) -> ToolOutcome:
+        sb, host = self.sandbox, self.host
+
+        async def read(p: str) -> tuple[bytes, str]:
+            r = await sb.http.get("/file/download", params={"path": p})
+            if r.status_code >= 400:
+                raise SandboxError(f"cannot read {p}")
+            return r.content, r.headers.get("content-type", "image/png").split(";")[0]
+        try:
+            if kind == "image":
+                refs = [await read(p) for p in (a.get("reference_images") or [])[:4]]
+                data = await media.generate_image(a["prompt"], refs, a.get("aspect_ratio") or "16:9")
+            elif kind == "speech":
+                data = await media.generate_speech(a["text"], a.get("voice") or "")
+            else:
+                ref = await read(a["reference_image"]) if a.get("reference_image") else None
+                data = await media.generate_video(a["prompt"], int(a.get("seconds") or 8), ref, a.get("aspect_ratio") or "16:9",
+                                                  on_progress=lambda p: self.on_progress and self.on_progress(f"video {p}%"))
+        except media.MediaError as e:
+            return ToolOutcome(f"{kind} generation failed: {e}", is_error=True, detail={"error": str(e)})
+        path = a["output_path"] if a["output_path"].startswith("/") else f"{sb.workdir}/{a['output_path']}"
+        d, _, fname = path.rpartition("/")
+        r = await sb.http.post("/file/upload", files={"file": (fname, data)}, data={"dir": d})
+        if r.status_code >= 400:
+            raise SandboxError(f"could not save {path}: {r.text[:200]}")
+        await host.keep_file(path, "edited")
+        what = {"image": "image", "speech": "audio", "video": "video"}[kind]
+        size = ""
+        if kind == "image" and data[:8] == b"\x89PNG\r\n\x1a\n":
+            size = f", {int.from_bytes(data[16:20], 'big')}x{int.from_bytes(data[20:24], 'big')}"
+        content: str | list = f"Saved the generated {what} to {path} ({len(data) // 1024} KB{size})."
+        if kind == "image" and config.BROWSER_VISION:  # let the model look at what it made (a small preview)
+            content = [{"type": "text", "text": content},
+                       {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": _preview(data)}}]
+        return ToolOutcome(content, {"media": {"kind": what, "path": path, "url": host.file_url(path),
+                                               "prompt": a.get("prompt") or a.get("text", "")[:500]}})
 
     def _attachments(self, paths: list[str] | None) -> list[dict]:
         return [{"path": p, "filename": p.rsplit("/", 1)[-1], "url": self.host.file_url(p)} for p in (paths or [])]
@@ -583,6 +642,18 @@ class Agent:
         if forced:
             summary = "The user chose to continue with the results finished so far; unfinished items were cancelled.\n\n" + summary
         return ToolOutcome(summary, {"mapReduce": {"taskStatus": "completed", "taskDetails": details}})
+
+
+def _preview(data: bytes, side: int = 768) -> str:
+    """A JPEG thumbnail (base64) of an image, small enough to show the model."""
+    import base64
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(data)).convert("RGB")
+    im.thumbnail((side, side))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=80)
+    return base64.b64encode(buf.getvalue()).decode()
 
 
 def render_plan(plan: list[dict]) -> str:

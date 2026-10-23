@@ -528,6 +528,101 @@ async def web_extract(req: ExtractReq):
         await ctx.close()
 
 
+# ---------------------------------------------------------------- slides ---
+# An HTML deck is a page of <section class="slide"> elements designed at a fixed size (default
+# 1280x720). Export renders each slide on its own: PNG images (previews and the PPTX), a vector PDF
+# (print CSS, one page per slide) and a PPTX with one full-bleed image per slide plus speaker notes.
+
+class SlidesReq(BaseModel):
+    file: str
+    formats: list[str] = ["pdf", "pptx"]
+    width: int = 1280
+    height: int = 720
+
+
+SLIDE_SEL = "section.slide, .slide"
+ISOLATE_JS = """([sel, i, w, h]) => {
+  const all = [...document.querySelectorAll(sel)].filter(s => !s.parentElement.closest(sel));
+  document.documentElement.classList.add('exporting');
+  all.forEach((s, k) => { s.style.display = k === i ? '' : 'none'; s.classList.toggle('active', k === i); });
+  const s = all[i];
+  if (getComputedStyle(s).display === 'none') s.style.display = 'block';  // decks that show slides by other means
+  Object.assign(s.style, {position: 'fixed', left: '0', top: '0', width: w + 'px', height: h + 'px', margin: '0',
+                          transform: 'none', zIndex: '2147483647', overflow: 'hidden'});
+  const n = s.querySelector('aside.notes, .notes');
+  return {title: (s.querySelector('h1,h2,h3')?.innerText || '').trim().slice(0, 120), notes: n ? n.innerText.trim() : ''};
+}"""
+PRINT_CSS = """@page { size: %dpx %dpx; margin: 0 }
+html, body { margin: 0 !important; padding: 0 !important; background: none !important; width: %dpx !important; }
+.deck, .slides { transform: none !important; display: block !important; width: auto !important; height: auto !important; }
+%s { position: relative !important; left: 0 !important; top: 0 !important;
+  width: %dpx !important; height: %dpx !important; margin: 0 !important; transform: none !important;
+  break-after: page; page-break-after: always; overflow: hidden !important; opacity: 1 !important; visibility: visible !important; }
+aside.notes, .notes, .deck-ui { display: none !important; }"""
+
+
+@app.post("/slides/export")
+async def slides_export(req: SlidesReq):
+    src = resolve(req.file)
+    if not src.is_file():
+        raise HTTPException(404, f"file not found: {src}")
+    w, h = req.width, req.height
+    out_dir = src.parent / f"{src.stem}_slides"
+    out_dir.mkdir(exist_ok=True)
+    async with browser.launch_lock:
+        b = await browser.launch_background()
+    ctx = await b.new_context(viewport={"width": w, "height": h}, device_scale_factor=1.5, locale="zh-CN")
+    try:
+        page = await ctx.new_page()
+        await page.goto(src.as_uri(), wait_until="load", timeout=60000)
+        await page.wait_for_timeout(800)  # web fonts, charts
+        count = await page.evaluate(f"() => [...document.querySelectorAll('{SLIDE_SEL}')].filter(s => !s.parentElement.closest('{SLIDE_SEL}')).length")
+        if not count:
+            raise HTTPException(400, "no slides found: wrap each slide in <section class=\"slide\">")
+        slides, thumbs = [], []
+        for i in range(count):
+            meta = await page.evaluate(ISOLATE_JS, [SLIDE_SEL, i, w, h])
+            await page.wait_for_timeout(120)
+            png = await page.screenshot(clip={"x": 0, "y": 0, "width": w, "height": h})
+            path = out_dir / f"slide-{i + 1:02d}.png"
+            path.write_bytes(png)
+            jpg = await page.screenshot(clip={"x": 0, "y": 0, "width": w, "height": h}, type="jpeg", quality=70, scale="css")
+            thumbs.append(base64.b64encode(jpg).decode())
+            slides.append({**meta, "image": str(path)})
+        out = {"count": count, "slides": slides, "thumbnails": thumbs}
+        if "pdf" in req.formats:
+            pdf_page = await ctx.new_page()
+            await pdf_page.goto(src.as_uri(), wait_until="load", timeout=60000)
+            await pdf_page.add_style_tag(content=PRINT_CSS % (w, h, w, SLIDE_SEL, w, h))
+            await pdf_page.evaluate(f"""() => {{ document.documentElement.classList.add('exporting');
+              document.querySelectorAll('{SLIDE_SEL}').forEach(s => {{ s.classList.add('active');
+                if (getComputedStyle(s).display === 'none') s.style.display = 'block'; }}); }}""")
+            await pdf_page.wait_for_timeout(500)
+            pdf = src.with_suffix(".pdf")
+            await pdf_page.pdf(path=str(pdf), width=f"{w}px", height=f"{h}px", print_background=True, prefer_css_page_size=True)
+            out["pdf"] = str(pdf)
+        if "pptx" in req.formats:
+            out["pptx"] = await asyncio.to_thread(_build_pptx, slides, src.with_suffix(".pptx"), w, h)
+        return out
+    finally:
+        await ctx.close()
+
+
+def _build_pptx(slides: list[dict], dest: Path, w: int, h: int) -> str:
+    from pptx import Presentation
+    from pptx.util import Emu
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(w * 9525), Emu(h * 9525)  # 1 px = 9525 EMU at 96 dpi
+    blank = prs.slide_layouts[6]
+    for s in slides:
+        slide = prs.slides.add_slide(blank)
+        slide.shapes.add_picture(s["image"], 0, 0, width=prs.slide_width, height=prs.slide_height)
+        if s.get("notes"):
+            slide.notes_slide.notes_text_frame.text = s["notes"]
+    prs.save(str(dest))
+    return str(dest)
+
+
 # ---------------------------------------------------------------- proxy ---
 # Lets the backend expose a service the agent started on an internal port
 # (deploy_expose_port) without publishing every container port.

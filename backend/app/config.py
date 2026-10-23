@@ -61,6 +61,11 @@ CONFIRM_ENABLED = _bool("MANUS_CONFIRM", True)
 SUGGESTIONS_ENABLED = _bool("MANUS_SUGGESTIONS", True)
 # Send browser screenshots to the model as images (better grounding, more tokens).
 BROWSER_VISION = _bool("MANUS_BROWSER_VISION", True)
+# media generation through the gateway (empty = capability off)
+IMAGE_MODEL = os.environ.get("MANUS_IMAGE_MODEL", "")
+TTS_MODEL = os.environ.get("MANUS_TTS_MODEL", "")
+TTS_VOICE = os.environ.get("MANUS_TTS_VOICE", "alloy")
+VIDEO_MODEL = os.environ.get("MANUS_VIDEO_MODEL", "")
 # Observations longer than this are written to a sandbox file and replaced by a
 # head/tail excerpt plus the path (Manus' "restorable compression").
 OBSERVATION_LIMIT = int(os.environ.get("MANUS_OBSERVATION_LIMIT", "12000"))

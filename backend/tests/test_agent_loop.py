@@ -757,3 +757,50 @@ def test_plugin_catalog_build():
     assert not plugins.build("stripe", {"key": "k"})["autoApprove"]  # can write: calls are confirmed
     gh = plugins.build("github", {"token": "t"})
     assert gh["headers"] == {"Authorization": "Bearer t"}
+
+
+@pytest.mark.asyncio
+async def test_slides_and_media(store, monkeypatch):
+    """slides_export renders an HTML deck in the sandbox; media tools save generated files there."""
+    import base64 as b64
+    import io
+    from PIL import Image
+    from app import media
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 36), "red").save(buf, "PNG")
+    png = buf.getvalue()
+    calls = []
+
+    async def fake_image(prompt, refs=None, aspect_ratio="16:9"):
+        calls.append((prompt, [m for _, m in refs or []], aspect_ratio))
+        return png
+
+    async def no_video(*a, **k):
+        raise media.MediaError("video generation is not configured (MANUS_VIDEO_MODEL)")
+    monkeypatch.setattr(media, "generate_image", fake_image)
+    monkeypatch.setattr(media, "generate_video", no_video)
+    deck = (config.SKILLS_DIR / "slides" / "template.html").read_text()
+    model = ScriptedModel([
+        msg(tool("file_write", file="deck/index.html", content=deck)),
+        msg(tool("slides_export", file="deck/index.html", formats=["pdf", "pptx"])),
+        msg(tool("media_generate_image", prompt="a drone", output_path="img/a.png", aspect_ratio="1:1")),
+        msg(tool("media_generate_image", prompt="make it blue", output_path="img/b.png", reference_images=["img/a.png"])),
+        msg(tool("media_generate_video", prompt="fly", output_path="v.mp4")),
+        msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("做个幻灯片", [])
+    await wait_status(s, {"idle"}, timeout=120)
+    done = {e["name"] + str(i): e for i, e in enumerate(s.events) if e["type"] == "toolUsed" and e["status"] in ("success", "error")}
+    sl = next(e for e in done.values() if e["name"] == "slides_export")["detail"]["slides"]
+    assert sl["count"] == 4 and sl["pdf"]["path"].endswith(".pdf") and sl["pptx"]["path"].endswith(".pptx")
+    assert sl["slides"][0]["title"] == "标题写结论，而不是话题" and sl["slides"][0]["thumb"].startswith("/api/sessions/")
+    imgs = [e for e in done.values() if e["name"] == "media_generate_image"]
+    assert all(e["status"] == "success" for e in imgs) and imgs[0]["detail"]["media"]["kind"] == "image"
+    assert calls[0][2] == "1:1" and calls[1][1] == ["image/png"]  # the reference was read from the sandbox
+    vid = next(e for e in done.values() if e["name"] == "media_generate_video")
+    assert vid["status"] == "error" and "not configured" in vid["detail"]["error"]
+    sent = next(b for m in s.messages if m["role"] == "user" for b in m["content"] if isinstance(b, dict)
+                and b.get("type") == "tool_result" and isinstance(b.get("content"), list))
+    assert any(x.get("type") == "image" for x in sent["content"])  # the model sees a preview of its image
+    assert {"index.pdf", "index.pptx", "a.png", "b.png"} <= {f["filename"] for f in s.files.values()}

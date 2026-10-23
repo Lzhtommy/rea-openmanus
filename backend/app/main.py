@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, connectors, llm, personal, plugins, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import config, connectors, llm, media, personal, plugins, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -815,7 +815,7 @@ async def vnc(websocket: WebSocket, sid: str):
 @app.get("/api/config")
 async def get_config():
     return {"model": config.MODEL, "defaultMode": config.DEFAULT_MODE, "sandbox": config.SANDBOX_MODE, "planner": config.PLANNER_ENABLED,
-            "search": "tavily" if config.TAVILY_API_KEY else "duckduckgo"}
+            "search": "tavily" if config.TAVILY_API_KEY else "duckduckgo", "media": media.capabilities()}
 
 
 @app.middleware("http")

@@ -121,6 +121,27 @@ _TOOLS = [
        "touching the interactive browser. Read-only: call it for several URLs in one turn to "
        "read sources in parallel. Use browser_* instead when the page needs interaction.",
        {"url": S}, ["url"]),
+    # ---- creation: slides and generated media
+    _t("slides_export",
+       "Render an HTML slide deck (each slide a <section class=\"slide\"> designed at 1280x720, see the slides "
+       "skill) to per-slide images and export PDF and/or PPTX next to it. Returns the slide count, titles and "
+       "output paths; check the images for overflow or layout problems before delivering.",
+       {"file": S, "formats": {"type": "array", "items": {"type": "string", "enum": ["pdf", "pptx"]}}}, ["file"]),
+    _t("media_generate_image",
+       "Generate an image from a text prompt and save it as PNG. Pass reference_images (sandbox paths) to edit "
+       "an image or keep a subject consistent. Write detailed prompts: subject, composition, style, lighting, "
+       "text to render (in quotes).",
+       {"prompt": S, "output_path": S, "reference_images": {"type": "array", "items": S},
+        "aspect_ratio": {"type": "string", "enum": ["16:9", "1:1", "9:16", "4:3", "3:4"]}},
+       ["prompt", "output_path"]),
+    _t("media_generate_speech", "Turn text into spoken audio (MP3), e.g. narration or a podcast segment.",
+       {"text": S, "output_path": S, "voice": S}, ["text", "output_path"]),
+    _t("media_generate_video",
+       "Generate a short video clip (MP4) from a prompt, optionally animating a reference image. Takes minutes; "
+       "describe camera movement, subject, action, setting and style.",
+       {"prompt": S, "output_path": S, "seconds": I, "reference_image": S,
+        "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1"]}},
+       ["prompt", "output_path"]),
     # ---- deploy
     _t("deploy_expose_port",
        "Expose a service listening on a sandbox port and return a public preview URL.",
@@ -221,7 +242,7 @@ def needs_confirm(name: str, args: dict) -> str | None:
 
 # Read-only tools without shared state. When every call in a turn is one of these they
 # run concurrently (Manus fires several webpage_extract / search calls at once).
-PARALLEL_SAFE = {"info_search_web", "info_search_image", "info_search_scholar", "info_extract_webpage", "file_read", "file_find_in_content", "mcp_search_tools",
+PARALLEL_SAFE = {"media_generate_image", "media_generate_speech", "info_search_web", "info_search_image", "info_search_scholar", "info_extract_webpage", "file_read", "file_find_in_content", "mcp_search_tools",
                  "file_find_by_name"}
 
 
@@ -262,6 +283,10 @@ def ui_category(name: str) -> str:
         return "mcp"
     if name.startswith("knowledge_"):
         return "knowledge"
+    if name.startswith("slides_"):
+        return "slides"
+    if name.startswith("media_"):
+        return "media"
     return name
 
 
@@ -317,6 +342,14 @@ def describe(name: str, args: dict) -> tuple[str, str]:
         return "Creating scheduled task", args.get("title", "")
     if name == "trigger_create":
         return "Creating trigger", args.get("title", "")
+    if name == "slides_export":
+        return "Exporting slides", args.get("file", "")
+    if name == "media_generate_image":
+        return "Generating image", args.get("output_path", "")
+    if name == "media_generate_speech":
+        return "Generating speech", args.get("output_path", "")
+    if name == "media_generate_video":
+        return "Generating video", args.get("output_path", "")
     if name == "knowledge_save":
         return "Saving knowledge", args.get("title") or args.get("content", "")[:60]
     return ACTION_LABEL.get(cat, name), ""

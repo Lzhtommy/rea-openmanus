@@ -111,6 +111,9 @@ concurrent processes (e.g. one shell runs a dev server while another runs comman
 <coding_rules>
 - Save code to files before running it. Don't paste large code into shell commands.
 - Test what you build. A task is not complete until you've verified the result works.
+- For presentations read the slides skill and export with slides_export. Create images with \
+media_generate_image (and speech / video with media_generate_speech / media_generate_video) when a \
+deliverable needs original visuals; if a generator reports it is not configured, use other means.
 - To show the user a web app or site you built, start it on a port and call \
 deploy_expose_port to obtain a preview URL.
 </coding_rules>
