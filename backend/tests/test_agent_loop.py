@@ -527,6 +527,40 @@ async def test_project_context(store, monkeypatch, tmp_path):
     assert "品牌色" in read["detail"]["textEditor"]["content"]
 
 
+@pytest.mark.asyncio
+async def test_idle_sandbox_reclaim(store, monkeypatch):
+    """Idle sandboxes are stopped (busy ones never); the next message restarts them with files intact."""
+    from app import main
+    model = ScriptedModel([
+        msg(tool("shell_exec", id="w", command="echo kept > keep.txt && sleep 2")),
+        msg(tool("idle")),
+        msg(tool("file_read", file="keep.txt")),
+        msg(tool("idle")),
+    ])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    manager.busy = lambda sid: bool((t := store.get(sid)) and t.task and not t.task.done())
+    stops = []
+    manager.on_stopped = stops.append
+    await s.user_message("write a file", [])
+    for _ in range(50):
+        if s.session_id in manager.sandboxes:
+            break
+        await asyncio.sleep(0.1)
+    assert s.session_id not in await manager.reap(idle_seconds=0.001)  # task still running: never reclaimed
+    await wait_status(s, {"idle"})
+    await asyncio.sleep(0.05)
+    assert s.session_id in await manager.reap(idle_seconds=0.001)
+    assert s.session_id not in manager.sandboxes and stops.count(s.session_id) == 1
+    await s.user_message("read it back", [])
+    await wait_status(s, {"idle"})
+    read = [e for e in s.events if e["type"] == "toolUsed" and e.get("name") == "file_read" and e["status"] == "success"]
+    assert "kept" in read[-1]["detail"]["textEditor"]["content"]
+    manager.busy = lambda sid: False
+    manager.on_stopped = lambda sid: None
+    del main
+
+
 def teardown_module():
     for proc in manager.local_procs.values():
         if proc.returncode is None:

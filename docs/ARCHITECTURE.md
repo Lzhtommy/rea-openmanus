@@ -194,6 +194,12 @@ webdev 全栈托管（自定义域名、Stripe 等）、Connectors 和 MCP 市�
 | `toolUsed.status: need_confirm` + `confirm_*` | `tools.needs_confirm` 规则（部署、git push、发布、对外 POST、远程登录、邮件、大范围删除），`confirm_action` 消息，拒绝作为错误结果返回模型 |
 | `chatDelta` 流式文本 | 网关流式输出，从 `message_*` 的部分 JSON 参数里实时解析 `text`，按 `streamId` 被最终 `chat` 替换 |
 | 沙箱文件同步到 `sessionFile/...`、资料库 | 写入/交付/上传的文件另存到 `data/sessions/<id>/files`，下载优先实时、回退副本；`/api/library` 与"资料库"页面 |
+| Manus 2.0 Max / 2.0 / Lite 模式与 Manus Flex（自带密钥：OpenAI、Anthropic、Google AI Studio、xAI、OpenRouter、Fireworks…）📷 | `providers.py`：三档模式 + Flex 提供商（另含 DeepSeek、Kimi、智谱、通义、硅基流动、自定义），网关专有参数只发给网关 |
+| `connectors.v1`（MCP stdio/SSE/HTTP）+ `manus-tools` 工具检索 | `connectors.py`：`mcp_search_tools` / `mcp_call_tool`，工具表保持静态 |
+| 分享页回放 | `/api/share/<token>`（文件与截图按 token 限定），前端只读回放 |
+| `retry_map_reduce_subtask` / `force_continue_map_reduce` / `resume_map_reduce` | `map_reduce_control` 消息 + 按会话缓存已完成子任务 |
+| `ProjectService` 项目 | `projects.py`：指令 + 文件，任务首轮装入沙箱 |
+| `start_sandbox` 等沙箱生命周期 | 空闲回收：`docker stop` 保留文件，下次使用自动 `docker start` |
 | `ScheduledTask` / 自动化 | `scheduler.py`（once/interval/daily/weekly），`/api/schedules`、`schedule_create` 工具、"自动化"页面 |
 这些都是在同一个 Agent 内核上叠加的业务功能，事件协议里已预留扩展点（`toolUsed.tool` 新增类别即可）。
 

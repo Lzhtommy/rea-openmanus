@@ -30,6 +30,8 @@ PROMPT_CACHE = _bool("MANUS_PROMPT_CACHE", True)
 SANDBOX_MODE = os.environ.get("MANUS_SANDBOX", "docker")
 SANDBOX_IMAGE = os.environ.get("MANUS_SANDBOX_IMAGE", "manus-sandbox:latest")
 SANDBOX_DIR = ROOT / "sandbox"
+# Stop sandboxes idle this long (files are kept; the next use restarts them). 0 disables reclaiming.
+SANDBOX_IDLE_MINUTES = float(os.environ.get("MANUS_SANDBOX_IDLE_MINUTES", "15"))
 
 
 def _utc_offset_minutes() -> int:

@@ -39,6 +39,16 @@ async def lifespan(app: FastAPI):
     projects.store = projects.Projects()
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
+    def busy(sid: str) -> bool:
+        s = session_mod.store.get(sid)
+        return bool(s and ((s.task and not s.task.done()) or s.pending_confirms or s.status in ("running", "waiting")))
+
+    def stopped(sid: str) -> None:
+        if s := session_mod.store.get(sid):
+            asyncio.create_task(s.emit({"type": "sandboxUpdate", "sandboxId": sid, "status": "stopped", "vnc": False}))
+
+    manager.busy, manager.on_stopped = busy, stopped
+    manager.reaper = asyncio.create_task(manager.reap_loop())
     connectors.manager = connectors.Connectors()
     asyncio.create_task(connectors.manager.start_all())
     yield
@@ -495,6 +505,9 @@ async def vnc(websocket: WebSocket, sid: str):
     """Relay the sandbox's live screen (VNC over WebSocket) to the web client, like Manus' vncUrl."""
     s = session_mod.store.get(sid)
     sb = manager.sandboxes.get(sid) if s else None
+    if sb and not sb.vnc:  # x11vnc may come up after the first health check: look again
+        with contextlib.suppress(httpx.HTTPError, ValueError):
+            sb.info = (await sb.http.get("/health", timeout=3)).json()
     if not sb or not sb.vnc:
         await websocket.close(code=1008)
         return
@@ -506,6 +519,7 @@ async def vnc(websocket: WebSocket, sid: str):
         await websocket.close(code=1011)
         return
     await websocket.accept(subprotocol="binary" if "binary" in wanted else None)
+    sb.viewers += 1
 
     async def up():
         while True:
@@ -524,6 +538,8 @@ async def vnc(websocket: WebSocket, sid: str):
     finally:
         for t in tasks:
             t.cancel()
+        sb.viewers -= 1
+        sb.touch()
         await upstream.close()
         with contextlib.suppress(RuntimeError):
             await websocket.close()

@@ -17,6 +17,12 @@
 - **操作确认**：部署、推送代码、发布、对外发送数据、远程登录、大范围删除等操作会挂起（`need_confirm`），用户允许后才执行，拒绝则作为错误返回模型
 - **流式输出**：回复和 `message_*` 的文本边生成边推送（`chatDelta`）
 - **文件持久化与资料库**：Agent 写入/交付的文件和用户上传都另存到会话目录，容器删除后仍可下载；"资料库"跨任务浏览、筛选、预览
+- **模式与 Flex**：顶栏切换 Max / 标准 / Lite（网关上的不同模型和推理强度）；Flex 用自己的密钥接 OpenAI、Anthropic、Google、xAI、DeepSeek、Kimi、智谱、通义千问、硅基流动、OpenRouter、Fireworks 或任意 OpenAI 兼容端点，也可直接选网关上的其他模型
+- **连接器（MCP）**：stdio / Streamable HTTP / SSE；工具不进工具表，Agent 用 `mcp_search_tools` 按需检索、`mcp_call_tool` 调用；非只读工具调用前需确认
+- **分享回放**：生成只读链接（可撤销），访客可浏览工作日志、电脑面板并按原节奏回放
+- **Wide Research 控制**：运行中可停止/重试单个子任务、强制继续；已完成项可在重跑时复用
+- **项目**：项目指令 + 项目文件，项目内的任务自动获得指令并把文件复制到沙箱 `~/project/`
+- **沙箱回收**：空闲（默认 15 分钟）且无人观看、任务不在运行的沙箱自动停止，保留文件，下次使用自动启动
 - **自动化（定时任务）**：仅一次 / 按间隔 / 每天 / 每周，到点自动新建任务运行；可在"自动化"页面管理，也可在对话里让 Agent 用 `schedule_create` 创建
 - **界面**：按 Manus 2.0 网页端还原（用 REA/CDP 实测的布局、设计变量和交互）：可折叠的工作日志与步骤分组、结果文件卡片与预览、追问建议、带时间轴回放的"电脑"面板、计划进度条、浅色/深色主题
 - **实时协议**：WebSocket 上传输 Manus 同构事件（`chat`/`toolUsed`/`planUpdate`/`statusUpdate`），支持断线续传、运行中追加消息、向用户提问、停止后恢复
@@ -54,6 +60,9 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 | `MANUS_SANDBOX_MEMORY` / `MANUS_SANDBOX_CPUS` | `4g` / `2` | 容器资源限制 |
 | `MANUS_PLANNER` | `true` | 是否启用 Planner 模块 |
 | `MANUS_CONFIRM` | `true` | 有外部影响的操作是否需要用户确认 |
+| `MANUS_MODEL_MAX` / `MANUS_MODEL_LITE` | 同 `MANUS_MODEL` | Max / Lite 模式使用的网关模型 |
+| `MANUS_DEFAULT_MODE` | `standard` | 新任务默认模式 |
+| `MANUS_SANDBOX_IDLE_MINUTES` | `15` | 沙箱空闲多久后停止，`0` 关闭回收 |
 | `MANUS_SANDBOX_TZ` | 服务器时区 | 沙箱时区（POSIX TZ，例如 `<+08>-8`） |
 | `MANUS_SUGGESTIONS` | `true` | 任务结束后是否生成追问建议 |
 | `MANUS_BROWSER_VISION` | `true` | 是否把浏览器截图发给模型 |
@@ -74,6 +83,9 @@ backend/app/
   search.py     网页搜索（Tavily / DuckDuckGo）
   skills.py     Skills 目录加载、装入沙箱
   scheduler.py  定时任务（下次运行时间计算、后台循环、按计划新建会话）
+  providers.py  模式与 Flex 提供商（目录、密钥存储、按会话解析模型配置）
+  connectors.py MCP 连接器（长连接会话、工具检索与调用、确认规则）
+  projects.py   项目（指令、文件、装入沙箱）
 backend/skills/     Skills（<name>/SKILL.md）
 backend/tests/      端到端测试（脚本化模型，不需要 API key）
 sandbox/            沙箱镜像（Dockerfile）和沙箱内动作 API 服务（server.py）

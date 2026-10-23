@@ -7,6 +7,8 @@ import logging
 import os
 import socket
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -29,6 +31,8 @@ class Sandbox:
         self.workdir = workdir
         self.mode = mode
         self.info: dict = {}  # /health payload: vnc availability, screen size
+        self.last_used = time.monotonic()
+        self.viewers = 0  # live-screen (VNC) connections: a watched sandbox is never reclaimed
         self.http = httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(660, connect=10))
 
     @property
@@ -39,7 +43,11 @@ class Sandbox:
     def ws_url(self) -> str:
         return self.base_url.replace("http://", "ws://", 1)
 
+    def touch(self) -> None:
+        self.last_used = time.monotonic()
+
     async def call(self, path: str, payload: dict | None = None) -> dict:
+        self.touch()
         try:
             r = await self.http.post(path, json=payload or {})
         except httpx.HTTPError as e:
@@ -89,12 +97,17 @@ class SandboxManager:
         self.sandboxes: dict[str, Sandbox] = {}
         self.local_procs: dict[str, asyncio.subprocess.Process] = {}
         self.locks: dict[str, asyncio.Lock] = {}
+        self.busy: Callable[[str], bool] = lambda sid: False  # set by the app: is the task using it?
+        self.on_stopped: Callable[[str], None] = lambda sid: None
+        self.started_at = time.monotonic()
+        self.reaper: asyncio.Task | None = None
 
     async def get(self, session_id: str) -> Sandbox:
         lock = self.locks.setdefault(session_id, asyncio.Lock())
         async with lock:
             sb = self.sandboxes.get(session_id)
             if sb:
+                sb.touch()
                 return sb
             sb = await (self._start_docker(session_id) if config.SANDBOX_MODE == "docker"
                         else self._start_local(session_id))
@@ -138,6 +151,60 @@ class SandboxManager:
         await sb.wait_ready()
         log.warning("LOCAL sandbox for %s at %s — commands run on the host, dev use only", sid, ws)
         return sb
+
+    # ---------------------------------------------------------- idle reclaim ---
+    async def reap(self, idle_seconds: float | None = None) -> list[str]:
+        """Stop sandboxes nobody used for a while (container stopped, not removed; files stay)."""
+        idle = (config.SANDBOX_IDLE_MINUTES * 60) if idle_seconds is None else idle_seconds
+        if idle <= 0:
+            return []
+        now, stopped = time.monotonic(), []
+        for sid, sb in list(self.sandboxes.items()):
+            if now - sb.last_used < idle or sb.viewers or self.busy(sid):
+                continue
+            async with self.locks.setdefault(sid, asyncio.Lock()):
+                if self.sandboxes.get(sid) is not sb:
+                    continue
+                await self.stop(sid)
+                stopped.append(sid)
+        # containers left running by an earlier backend process, once they have been idle as long
+        if config.SANDBOX_MODE == "docker" and now - self.started_at >= idle:
+            try:
+                running = (await _run("docker", "ps", "--filter", "label=manus.sandbox=1", "--format", "{{.Names}}")).split()
+            except SandboxError:
+                running = []
+            for name in running:
+                sid = name.removeprefix("manus-sbx-")
+                if sid not in self.sandboxes and not self.busy(sid):
+                    await self.stop(sid)
+                    stopped.append(sid)
+        return stopped
+
+    async def stop(self, sid: str) -> None:
+        sb = self.sandboxes.pop(sid, None)
+        if sb:
+            try:
+                await sb.close()
+            except Exception:  # never let a broken client keep a sandbox running
+                pass
+        if config.SANDBOX_MODE == "docker":
+            try:
+                await _run("docker", "stop", "-t", "3", f"manus-sbx-{sid}")
+            except SandboxError as e:
+                log.warning("stop %s: %s", sid, e)
+        proc = self.local_procs.pop(sid, None)
+        if proc and proc.returncode is None:
+            proc.terminate()
+        log.info("sandbox %s stopped (idle)", sid)
+        self.on_stopped(sid)
+
+    async def reap_loop(self, every: float = 60) -> None:
+        while True:
+            await asyncio.sleep(every)
+            try:
+                await self.reap()
+            except Exception:
+                log.exception("sandbox reaper failed")
 
     async def destroy(self, sid: str) -> None:
         sb = self.sandboxes.pop(sid, None)
