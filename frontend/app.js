@@ -2052,6 +2052,7 @@ async function openSettings(tab = "account") {
     const notify = store.get("notify", "0") === "1";
     body.innerHTML = `<div class="set-row"><div><b>外观</b><div class="muted">浅色、深色或跟随系统</div></div><select id="set-theme">${[["auto", "跟随系统"], ["light", "浅色"], ["dark", "深色"]].map(([v, l]) => `<option value="${v}" ${store.get("theme", "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>` +
       `<div class="set-row"><div><b>桌面通知</b><div class="muted">页面在后台时，任务完成、需要你回复或确认时提醒你</div></div><button class="switch ${notify ? "on" : ""}" id="set-notify"><i></i></button></div>` +
+      `<div class="set-row"><div><b>Mail Manus</b><div class="muted">${S.cfg.mail ? "把任务发邮件到这个地址，OpenManus 会完成后回信给你（多用户模式下需使用账号登记的邮箱）" : "未配置：设置 MANUS_MAIL_IMAP_HOST / USER / PASSWORD（以及回信用的 SMTP_HOST）后可通过邮件分配任务"}</div></div><span>${esc(S.cfg.mail || "—")}</span></div>` +
       `<div class="set-row"><div><b>默认模式</b><div class="muted">新任务默认使用的模式，可在顶栏随时切换</div></div><span>${esc(selLabel(defaultSel()))}</span></div>`;
   } else if (tab === "shortcuts") {
     body.innerHTML = [["⌘ / Ctrl + K", "新建任务"], ["Enter", "发送消息"], ["Shift + Enter", "换行"], ["Esc", "关闭预览 / 退出全屏"], ["← →", "在幻灯片查看器中翻页（幻灯片文件内）"]]

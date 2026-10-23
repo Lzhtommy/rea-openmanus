@@ -1106,3 +1106,29 @@ def test_developer_api_and_export(monkeypatch, tmp_path):
         z = zipfile.ZipFile(io.BytesIO(c.get("/api/data/export").content))
         assert f"tasks/{t['id']}/meta.json" in z.namelist() and "personalization.json" in z.namelist()
         assert c.delete("/api/data/tasks").json()["deleted"] == 1 and c.get("/api/sessions").json() == []
+
+
+@pytest.mark.asyncio
+async def test_mail_manus(store, monkeypatch):
+    """An email becomes a task with its attachments; the result is mailed back to the sender."""
+    from email.message import EmailMessage
+    from app import mail
+    m = EmailMessage()
+    m["From"], m["Subject"] = "Li <li@example.com>", "整理这份数据"
+    m.set_content("请统计表格的行数")
+    m.add_attachment(b"a,b\n1,2\n", maintype="text", subtype="csv", filename="data.csv")
+    sent = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, rid="": sent.append((to, subject, text)))
+    model = ScriptedModel([msg(tool("message_notify_user", text="共 2 行", kind="result")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    poller = mail.MailManus(store)
+    sid = await poller.handle(mail.parse(m.as_bytes()))
+    s = store.get(sid)
+    await wait_status(s, {"idle"})
+    first = s.messages[0]["content"][0]["text"]
+    assert "整理这份数据" in first and "请统计表格的行数" in first and "upload/data.csv" in first
+    for _ in range(150):
+        if sent:
+            break
+        await asyncio.sleep(0.1)
+    assert sent and sent[0][0] == "li@example.com" and "共 2 行" in sent[0][2]

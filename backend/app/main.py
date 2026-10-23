@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import agents, apikeys, auth, computers, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import agents, apikeys, auth, computers, mail, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -52,6 +52,8 @@ async def lifespan(app: FastAPI):
     scheduler_mod.scheduler.start()
     triggers_mod.triggers = triggers_mod.Triggers(session_mod.store)
     triggers_mod.triggers.start()
+    mail.poller = mail.MailManus(session_mod.store)
+    mail.poller.start()
     def users(sbid: str) -> list:  # sessions acting in this sandbox (a computer can serve many)
         return [s for s in session_mod.store.sessions.values() if s.sandbox_id == sbid]
 
@@ -1547,7 +1549,7 @@ async def _relay_vnc(websocket: WebSocket, sb) -> None:
 @app.get("/api/config")
 async def get_config():
     return {"model": config.MODEL, "defaultMode": config.DEFAULT_MODE, "sandbox": config.SANDBOX_MODE, "planner": config.PLANNER_ENABLED,
-            "search": "tavily" if config.TAVILY_API_KEY else "duckduckgo", "media": media.capabilities()}
+            "search": "tavily" if config.TAVILY_API_KEY else "duckduckgo", "mail": mail.CFG["ADDRESS"] or (mail.CFG["USER"] if mail.enabled() else ""), "media": media.capabilities()}
 
 
 @app.middleware("http")
