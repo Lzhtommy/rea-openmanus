@@ -1562,11 +1562,17 @@ async def get_config():
 
 @app.middleware("http")
 async def no_cache_static(request: Request, call_next):
-    """The UI is plain files without build hashes: make browsers revalidate them."""
+    """Make browsers revalidate the UI (index.html is unhashed; hashed bundles just revalidate cheaply)."""
     response = await call_next(request)
     if not request.url.path.startswith(("/api/", "/preview/")):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
 
-app.mount("/", StaticFiles(directory=str(config.STATIC_DIR), html=True), name="static")
+if config.STATIC_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(config.STATIC_DIR), html=True), name="static")
+else:
+    @app.get("/", include_in_schema=False)
+    async def ui_not_built():
+        return Response("The web UI is not built yet: run `npm install && npm run build` in frontend/.",
+                        status_code=503, media_type="text/plain; charset=utf-8")

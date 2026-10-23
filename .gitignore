@@ -12,3 +12,7 @@ data/
 sandbox/.venv/
 .env
 .pytest_cache/
+
+# Web client
+node_modules/
+*.tsbuildinfo

@@ -52,7 +52,8 @@ DATA_DIR = Path(os.environ.get("MANUS_DATA_DIR", ROOT / "data"))
 SESSIONS_DIR = DATA_DIR / "sessions"
 WORKSPACES_DIR = DATA_DIR / "workspaces"  # local sandbox mode only
 SKILLS_DIR = ROOT / "backend" / "skills"
-STATIC_DIR = ROOT / "frontend"
+# The web client's production build (`npm run build` in frontend/).
+STATIC_DIR = Path(os.environ.get("MANUS_STATIC_DIR", ROOT / "frontend" / "dist"))
 
 PLANNER_ENABLED = _bool("MANUS_PLANNER", True)
 # Hold outward-facing / irreversible actions until the user approves them (Manus' need_confirm).

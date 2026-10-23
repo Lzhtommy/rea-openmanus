@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688)
 ![Docker](https://img.shields.io/badge/sandbox-Docker-2496ED)
-![Frontend](https://img.shields.io/badge/frontend-vanilla%20JS-F7DF1E)
+![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61DAFB)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 [功能](#功能) · [快速开始](#快速开始) · [配置](#配置) · [架构](#架构) · [开发](#开发) · [贡献](#贡献)
@@ -104,6 +104,7 @@ OpenManus 参照 [Manus](https://manus.im) 的架构做了一份 clean-room 实�
 ### 前置要求
 
 - Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)
+- Node.js 20+（构建 Web 界面）
 - Docker（生产模式需要）
 - 一个 LiteLLM（或其他 OpenAI 兼容）网关及其 API key
 
@@ -116,6 +117,9 @@ cd rea-openmanus
 # 1. 配置凭据
 cp .env.example .env          # 至少填写 MANUS_LLM_BASE_URL 和 MANUS_LLM_API_KEY
 set -a; source .env; set +a
+
+# 2. 构建 Web 界面（输出到 frontend/dist，由后端托管）
+cd frontend && npm install && npm run build && cd ..
 ```
 
 **方式 A：Docker 沙箱（推荐）**
@@ -216,7 +220,7 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 
 ```
 ┌──────────────┐  WebSocket / HTTP  ┌──────────────────────────────┐   动作 API   ┌───────────────────┐
-│  前端 (JS)   │ ◀────────────────▶ │  后端 (FastAPI)               │ ◀──────────▶ │ 沙箱 (Docker)      │
+│ 前端 (React) │ ◀────────────────▶ │  后端 (FastAPI)               │ ◀──────────▶ │ 沙箱 (Docker)      │
 │  工作日志     │   Manus 同构事件    │  Session · Agent Loop        │              │ shell · 文件       │
 │  电脑面板     │                    │  Planner · 工具分发 · 压缩     │              │ Chromium + Xvfb   │
 └──────────────┘                    └──────────────┬───────────────┘              └───────────────────┘
@@ -264,7 +268,7 @@ backend/
   tests/            端到端测试
 sandbox/            沙箱镜像（Dockerfile）和沙箱内动作 API 服务（server.py）
 device/             连接本机用的设备端程序
-frontend/           Web 界面（原生 JS，无需构建，支持 PWA）
+frontend/           Web 界面（React + TypeScript + Vite，支持 PWA）
 docs/               架构文档
 ```
 
@@ -280,7 +284,30 @@ cd backend && MANUS_SANDBOX=local uv run python -m pytest tests -q
 
 ### 前端
 
-前端是原生 JS，没有构建步骤，修改 `frontend/` 下的文件后刷新页面即可。
+Web 界面在 `frontend/`，使用 React 19 + TypeScript + Vite：
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:5173，热更新；/api 和 WebSocket 代理到后端
+npm run typecheck  # 类型检查
+npm run build      # 生产构建，输出到 frontend/dist
+```
+
+开发服务器默认代理到 `http://127.0.0.1:8000`，可用 `OPENMANUS_BACKEND` 指定其他后端地址。后端默认托管 `frontend/dist`，可用 `MANUS_STATIC_DIR` 指向其他目录。
+
+代码结构：
+
+```
+src/
+  store.ts        全局状态与渲染调度（useStore / render / touch）
+  events.ts       WebSocket 与事件模型（把事件流折叠成 turn 和 step）
+  actions.ts      导航、数据加载和共享命令
+  App.tsx         应用外壳；Chrome.tsx 是侧栏和顶栏
+  session/        任务会话：工作日志、电脑面板、任务栏、输入框
+  views/          各页面及其弹窗
+  lib/            图标、工具函数、Markdown 渲染、noVNC 加载
+```
 
 ## 安全
 
