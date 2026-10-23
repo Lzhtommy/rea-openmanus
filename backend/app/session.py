@@ -36,6 +36,8 @@ class Session(AgentHost):
         self.inbox: list[str] = []
         self.pending_reply: asyncio.Future | None = None
         self.pending_confirms: dict[str, asyncio.Future] = {}
+        self.mr_controls: dict[str, asyncio.Queue] = {}  # running map-reduce batches -> control queue
+        self.map_reduce_cache: dict[str, str] = {}
         self.approved: set[str] = set()
         self.files: dict[str, dict] = {}  # sandbox path -> stored copy (survives the sandbox)
         self.schedule_id: str | None = None  # set when a scheduled task started this session
@@ -59,7 +61,8 @@ class Session(AgentHost):
 
     def persist(self) -> None:
         (self.dir / "meta.json").write_text(json.dumps({**self.meta(), "envAnnounced": self.env_announced,
-                                                        "files": self.files, "share": self.share}, ensure_ascii=False))
+                                                        "files": self.files, "share": self.share,
+                                                        "mrCache": self.map_reduce_cache}, ensure_ascii=False))
         (self.dir / "messages.json").write_text(json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
@@ -72,6 +75,7 @@ class Session(AgentHost):
         s.schedule_id = meta.get("scheduleId")
         s.model_selection = meta.get("model") or {}
         s.share = meta.get("share")
+        s.map_reduce_cache = meta.get("mrCache", {})
         s.status = meta.get("status", "idle")
         if s.status in ("running", "waiting"):
             s.status = "stopped"  # process restarted mid-run
@@ -132,6 +136,21 @@ class Session(AgentHost):
             self.pending_confirms.pop(action_id, None)
             if not self.pending_confirms:
                 await self.emit({"type": "statusUpdate", "agentStatus": "running"})
+
+    def map_reduce_controls(self, action_id: str) -> asyncio.Queue:
+        self.mr_controls[action_id] = asyncio.Queue()
+        return self.mr_controls[action_id]
+
+    def map_reduce_done(self, action_id: str) -> None:
+        self.mr_controls.pop(action_id, None)
+        self.persist()
+
+    def control_map_reduce(self, action_id: str, op: str, index: int | None = None) -> bool:
+        q = self.mr_controls.get(action_id)
+        if not q or op not in ("retry", "cancel", "force_continue"):
+            return False
+        q.put_nowait((op, index))
+        return True
 
     def resolve_confirm(self, action_id: str, approved: bool) -> bool:
         fut = self.pending_confirms.get(action_id)

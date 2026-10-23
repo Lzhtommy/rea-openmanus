@@ -568,8 +568,17 @@ function stepView(s) {
     return `<a class="serp-item" href="${esc(r.url)}" target="_blank"><div class="serp-title"><span class="fav">${esc((h[0] || "?").toUpperCase())}</span><span>${esc(r.title)}</span></div><div class="serp-snip">${esc(r.snippet)}</div><div class="serp-url">${esc(h)}</div></a>`;
   }).join("")}</div>`;
   if (d.textEditor) return editorHtml(d.textEditor);
-  if (d.mapReduce) return `<div class="mr">${d.mapReduce.taskDetails.map((t) => `<div class="mr-row"><span class="s ${t.status}">${{ pending: "○", running: "◌", completed: "✓", failed: "✕" }[t.status] || ""}</span><div class="b"><div>${t.index + 1}. ${esc(t.item)}</div>` +
-    (t.status === "running" && t.progress ? `<div class="p">${esc(t.progress)}</div>` : "") + (t.result ? `<details><summary>结果</summary><div class="prose">${md(t.result)}</div></details>` : "") + `</div></div>`).join("")}</div>`;
+  if (d.mapReduce) {
+    // Manus' map_reduce controls: stop / retry one item, or continue now with what is finished
+    const live = !S.readonly && d.mapReduce.taskStatus === "running" && (s.status === "running" || s.status === "start");
+    const ctl = (op, i, label) => `<button class="btn ghost sm" data-act="mr" data-id="${esc(s.actionId)}" data-op="${op}" data-i="${i ?? ""}">${label}</button>`;
+    const done = d.mapReduce.taskDetails.filter((t) => t.status === "completed").length;
+    return `<div class="mr">${live ? `<div class="mr-head"><span>${done} / ${d.mapReduce.taskDetails.length} 已完成</span>${ctl("force_continue", null, "强制继续")}</div>` : ""}${
+      d.mapReduce.taskDetails.map((t) => `<div class="mr-row"><span class="s ${t.status}">${{ pending: "○", running: "◌", completed: "✓", failed: "✕", cancelled: "–" }[t.status] || ""}</span><div class="b"><div>${t.index + 1}. ${esc(t.item)}${t.status === "cancelled" ? ' <span class="p">已取消</span>' : ""}</div>` +
+      (t.progress && t.status !== "failed" ? `<div class="p">${esc(t.progress)}</div>` : "") + (t.result ? `<details><summary>结果</summary><div class="prose">${md(t.result)}</div></details>` : "") + `</div>` +
+      (live && (t.status === "running" || t.status === "pending") ? ctl("cancel", t.index, "停止") : "") +
+      (live && (t.status === "failed" || t.status === "cancelled") ? ctl("retry", t.index, "重试") : "") + `</div>`).join("")}</div>`;
+  }
   if (d.mcp) return `<div class="file-head">${icon("plug")}<span class="grow">${esc(d.mcp.server)} · ${esc(d.mcp.action)}</span></div>` +
     `<div class="page-md"><div class="mcp-label">参数</div><pre class="cc-cmd">${esc(d.mcp.argumentsPreview)}</pre><div class="mcp-label">结果</div><pre class="cc-cmd mcp-out">${esc(d.mcp.resultPreview)}</pre></div>`;
   if (d.schedule) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${autoCardHtml(d.schedule, false)}</div></div>`;
@@ -1193,6 +1202,13 @@ function bind() {
       case "open-file": if (e.target.closest("a[download]")) return; S.panel.open = true; S.panel.userClosed = false; S.panel.file = { url: a.dataset.url, name: a.dataset.name, path: a.dataset.path }; refreshSel(); break;
       case "plan": e.stopPropagation(); S.planOpen = !S.planOpen; renderTaskbar(); return;
       case "takeover": if (!S.readonly) toggleTakeover(); break;
+      case "mr": {
+        if (S.readonly) break;
+        const msg = { type: "map_reduce_control", sessionId: S.current, actionId: a.dataset.id, op: a.dataset.op };
+        if (a.dataset.i !== "") msg.index = +a.dataset.i;
+        send(msg); a.disabled = true;
+        break;
+      }
       case "confirm": {
         const s = S.steps[S.stepIdx[a.dataset.id]];
         if (!s || s._answered || S.readonly) break;

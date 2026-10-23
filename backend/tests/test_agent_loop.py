@@ -63,7 +63,8 @@ class ScriptedModel:
         if isinstance(first, str) and "sub-agent" in first:
             item = first.split("Your item: ")[1].split("\n")[0]
             if len(messages) == 1:
-                return msg(tool("shell_exec", id=f"sub-{item}", command=f"echo researching {item}"))
+                cmd = f"sleep 20; echo {item}" if item.startswith("slow") else f"echo researching {item}"
+                return msg(tool("shell_exec", id=f"sub-{item}-{next(_ids)}", command=cmd, timeout=25))
             return msg(tool("idle", result=f"Findings for {item}: ok"))
         step = self.script.pop(0)
         return step(messages) if callable(step) else step
@@ -452,6 +453,56 @@ async def test_share_link(store):
     await main.revoke_share(s.session_id)
     with pytest.raises(HTTPException):
         await main.get_share(token)
+
+
+@pytest.mark.asyncio
+async def test_map_reduce_controls(store, monkeypatch):
+    """Wide Research: cancel / retry one item, force-continue the batch, and resume finished items later."""
+    model = ScriptedModel([
+        msg(tool("agent_map_reduce", instruction="research", items=["alpha", "slow1", "slow2"])),
+        lambda m: msg(tool("message_notify_user", text=m[-1]["content"][0]["content"][:120])),
+        msg(tool("agent_map_reduce", instruction="research", items=["alpha", "beta"])),
+        msg(tool("idle")),
+    ])
+    monkeypatch.setattr(config, "WIDE_RESEARCH_CONCURRENCY", 3)
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("research three things", [])
+
+    def latest(aid=None):
+        evs = [e for e in s.events if e["type"] == "toolUsed" and e.get("name") == "agent_map_reduce" and e.get("detail")
+               and (aid is None or any(d["item"] == "slow1" for d in e["detail"]["mapReduce"]["taskDetails"]))]
+        return evs[-1] if evs else None
+
+    first = None
+
+    async def until(cond, timeout=30):
+        for _ in range(timeout * 10):
+            if (e := latest(first)) and cond({d["item"]: d["status"] for d in e["detail"]["mapReduce"]["taskDetails"]}):
+                return e
+            await asyncio.sleep(0.1)
+        e = latest(first)
+        raise AssertionError({d["item"]: (d["status"], d["progress"]) for d in e["detail"]["mapReduce"]["taskDetails"]} if e else None)
+
+    ev = await until(lambda st: st["alpha"] == "completed" and st["slow1"] == "running" and st["slow2"] == "running")
+    aid = first = ev["actionId"]
+    assert s.control_map_reduce(aid, "cancel", 1)
+    await until(lambda st: st["slow1"] == "cancelled")
+    assert s.control_map_reduce(aid, "retry", 1)
+    await until(lambda st: st["slow1"] == "running")
+    assert s.control_map_reduce(aid, "force_continue")
+    ev = await until(lambda st: st["slow1"] == "cancelled" and st["slow2"] == "cancelled")
+    for _ in range(100):
+        if any(e["type"] == "chat" and e["sender"] == "assistant" for e in s.events):
+            break
+        await asyncio.sleep(0.1)
+    note = next(e for e in s.events if e["type"] == "chat" and e["sender"] == "assistant")["content"]
+    assert "continue with the results finished so far" in note
+    assert not s.control_map_reduce(aid, "retry", 1)  # batch is over
+
+    await wait_status(s, {"idle"}, timeout=60)  # second batch: alpha is reused, beta runs
+    last = latest()["detail"]["mapReduce"]["taskDetails"]
+    assert last[0]["progress"] == "复用之前的结果" and all(d["status"] == "completed" for d in last)
 
 
 def teardown_module():

@@ -408,6 +408,9 @@ async def ws(websocket: WebSocket):
                     await s.user_message(text, msg.get("attachments") or [])
             elif kind == "stop_session":
                 await s.stop()
+            elif kind == "map_reduce_control":
+                idx = msg.get("index")
+                s.control_map_reduce(str(msg.get("actionId")), str(msg.get("op")), int(idx) if idx is not None else None)
             elif kind == "confirm_action":
                 s.resolve_confirm(str(msg.get("actionId")), bool(msg.get("approved")))
     except WebSocketDisconnect:

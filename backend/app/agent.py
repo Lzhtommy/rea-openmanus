@@ -58,6 +58,9 @@ class AgentHost:
     async def ask_user(self, text: str, attachments: list[str], takeover: str, stream_id: str = "") -> str: ...
     def drain_inbox(self) -> list[str]: return []
     async def confirm(self, action_id: str) -> bool: return True
+    def map_reduce_controls(self, action_id: str) -> asyncio.Queue: return asyncio.Queue()
+    def map_reduce_done(self, action_id: str) -> None: ...
+    map_reduce_cache: dict[str, str] = {}  # instruction+item -> finished result (Session keeps its own)
     def save_shot(self, b64: str) -> str: return ""
     def file_url(self, path: str) -> str: return path
     async def keep_file(self, path: str, kind: str) -> None: ...
@@ -450,8 +453,22 @@ class Agent:
                 await self.host.emit({**base, "id": base["actionId"], "status": "running",
                                       "detail": {"mapReduce": {"taskStatus": "running", "taskDetails": details}}})
 
+        cache = self.host.map_reduce_cache
+        key = lambda d: f"{a['instruction']}\x00{d['item']}"  # noqa: E731
+
         async def worker(d: dict):
-            async with sem:
+            if key(d) in cache:  # resume: an earlier run of this batch already finished the item
+                d["result"], d["status"], d["progress"] = cache[key(d)], "completed", "复用之前的结果"
+                await push(True)
+                return
+            d["status"], d["result"], d["progress"] = "pending", None, ""
+            try:
+                await sem.acquire()
+            except asyncio.CancelledError:  # cancelled while still queued
+                d["result"], d["status"] = "(cancelled by the user)", "cancelled"
+                await push(True)
+                return
+            try:
                 d["status"] = "running"
                 await push(True)
                 hint = ""
@@ -469,13 +486,45 @@ class Agent:
                     await sub.run()
                     d["result"] = sub.result or "(no result)"
                     d["status"] = "failed" if d["result"].startswith("ERROR:") else "completed"
+                    if d["status"] == "completed":
+                        cache[key(d)] = d["result"][:20000]
+                except asyncio.CancelledError:  # stopped by the user (single item or force-continue)
+                    d["result"], d["status"] = "(cancelled by the user)", "cancelled"
                 except Exception as e:  # one failed item must not sink the batch
                     d["result"], d["status"] = f"ERROR: {e}", "failed"
                 await push(True)
+            finally:
+                sem.release()
 
-        await asyncio.gather(*(worker(d) for d in details))
+        # Manus-style controls while the batch runs: retry / cancel one item, or force-continue with what is done.
+        controls = self.host.map_reduce_controls(base["actionId"])
+        tasks = {d["index"]: asyncio.create_task(worker(d)) for d in details}
+        forced = False
+        try:
+            while pending := [t for t in tasks.values() if not t.done()]:
+                ctl = asyncio.create_task(controls.get())
+                done, _ = await asyncio.wait([*pending, ctl], return_when=asyncio.FIRST_COMPLETED)
+                if ctl not in done:
+                    ctl.cancel()
+                    continue
+                op, idx = ctl.result()
+                if op == "cancel" and idx in tasks and not tasks[idx].done():
+                    tasks[idx].cancel()
+                elif op == "retry" and idx in tasks and tasks[idx].done() and details[idx]["status"] in ("failed", "cancelled"):
+                    tasks[idx] = asyncio.create_task(worker(details[idx]))
+                elif op == "force_continue":
+                    forced = True
+                    for t in tasks.values():
+                        t.cancel()
+        finally:
+            for t in tasks.values():
+                t.cancel()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+            self.host.map_reduce_done(base["actionId"])
         summary = "\n\n".join(f"### Item {d['index'] + 1}: {d['item']}\nStatus: {d['status']}\n{d['result']}"
                               for d in details)
+        if forced:
+            summary = "The user chose to continue with the results finished so far; unfinished items were cancelled.\n\n" + summary
         return ToolOutcome(summary, {"mapReduce": {"taskStatus": "completed", "taskDetails": details}})
 
 
