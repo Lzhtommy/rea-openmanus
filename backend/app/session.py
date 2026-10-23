@@ -17,7 +17,7 @@ import logging
 import time
 from pathlib import Path
 
-from . import config, connectors, llm, providers, skills
+from . import config, connectors, llm, projects, providers, skills
 from .agent import Agent, AgentHost, now_ms, render_plan, short_id
 from .sandbox import manager
 
@@ -41,6 +41,8 @@ class Session(AgentHost):
         self.approved: set[str] = set()
         self.files: dict[str, dict] = {}  # sandbox path -> stored copy (survives the sandbox)
         self.schedule_id: str | None = None  # set when a scheduled task started this session
+        self.project_id: str | None = None  # project this task belongs to (instructions + files)
+        self.project_announced = False
         self.share: dict | None = None  # {token, createdAt}: public read-only replay link
         self.connectors_note = ""  # last connector summary told to the agent (re-sent when it changes)
         self.model_selection: dict = {}  # {mode, provider?, model?} chosen in the UI (Manus' mode selector)
@@ -57,12 +59,13 @@ class Session(AgentHost):
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
                 "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id,
-                "model": self.model_selection, "shared": bool(self.share)}
+                "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id}
 
     def persist(self) -> None:
         (self.dir / "meta.json").write_text(json.dumps({**self.meta(), "envAnnounced": self.env_announced,
                                                         "files": self.files, "share": self.share,
-                                                        "mrCache": self.map_reduce_cache}, ensure_ascii=False))
+                                                        "mrCache": self.map_reduce_cache,
+                                                        "projectAnnounced": self.project_announced}, ensure_ascii=False))
         (self.dir / "messages.json").write_text(json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
@@ -75,6 +78,8 @@ class Session(AgentHost):
         s.schedule_id = meta.get("scheduleId")
         s.model_selection = meta.get("model") or {}
         s.share = meta.get("share")
+        s.project_id = meta.get("projectId")
+        s.project_announced = meta.get("projectAnnounced", False)
         s.map_reduce_cache = meta.get("mrCache", {})
         s.status = meta.get("status", "idle")
         if s.status in ("running", "waiting"):
@@ -275,6 +280,10 @@ class Session(AgentHost):
                 if catalog := skills.catalog(sandbox):
                     system_notes.append(catalog)
                 self.env_announced = True
+            if self.project_id and projects.store and self.project_id in projects.store.items and not self.project_announced:
+                paths = await projects.store.install(self.project_id, sandbox)
+                system_notes.append(projects.store.note(self.project_id, paths))
+                self.project_announced = True
             if connectors.manager and (summary := connectors.manager.summary()) != self.connectors_note:
                 system_notes.append(summary or "<connectors>\nNo MCP servers are connected now.\n</connectors>")
                 self.connectors_note = summary

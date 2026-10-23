@@ -505,6 +505,28 @@ async def test_map_reduce_controls(store, monkeypatch):
     assert last[0]["progress"] == "复用之前的结果" and all(d["status"] == "completed" for d in last)
 
 
+@pytest.mark.asyncio
+async def test_project_context(store, monkeypatch, tmp_path):
+    """A task in a project gets the project's instructions and a copy of its files in the sandbox."""
+    from app import main, projects
+    projects.store = projects.Projects()
+    monkeypatch.setattr(projects.store, "root", tmp_path / "projects")
+    monkeypatch.setattr(projects.store, "path", tmp_path / "projects.json")
+    p = projects.store.create("品牌手册", "所有文案都使用正式的书面语。")
+    projects.store.add_file(p["id"], "guide.md", "# 品牌色：深蓝".encode())
+    model = ScriptedModel([msg(tool("file_read", file="project/guide.md")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    meta = await main.create_session({"projectId": p["id"]})
+    s = store.get(meta["id"])
+    assert meta["projectId"] == p["id"]
+    await s.user_message("写一段介绍", [])
+    await wait_status(s, {"idle"})
+    note = next(m["content"] for m in s.messages if m["role"] == "system" and "<project" in m["content"])
+    assert "正式的书面语" in note and "guide.md" in note
+    read = next(e for e in s.events if e["type"] == "toolUsed" and e.get("name") == "file_read" and e["status"] == "success")
+    assert "品牌色" in read["detail"]["textEditor"]["content"]
+
+
 def teardown_module():
     for proc in manager.local_procs.values():
         if proc.returncode is None:

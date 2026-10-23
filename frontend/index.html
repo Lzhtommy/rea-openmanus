@@ -25,6 +25,9 @@
         <button class="nav-item" id="nav-conn"><span class="nav-ico" data-icon="plug"></span><span class="nav-label">连接器</span></button>
         <button class="nav-item" id="nav-library"><span class="nav-ico" data-icon="library"></span><span class="nav-label">资料库</span></button>
         <div class="nav-search hidden" id="nav-search"><span data-icon="search"></span><input id="search-input" placeholder="搜索任务" /></div>
+        <div class="nav-section">项目</div>
+        <button class="nav-item" id="new-project"><span class="nav-ico" data-icon="folderPlus"></span><span class="nav-label">新项目</span></button>
+        <div id="project-list"></div>
         <div class="nav-section">任务</div>
         <div id="session-list"></div>
       </div>
@@ -84,6 +87,20 @@
           <div class="lib-head"><h2>连接器</h2><button class="btn primary" id="conn-new">添加连接器</button></div>
           <p class="auto-intro">通过 MCP 把外部工具和数据接入 OpenManus。Agent 会按需搜索并调用这些工具；未标记为只读的工具在调用前会请你确认。</p>
           <div id="conn-list"></div>
+        </div>
+      </div>
+
+      <div id="project-view" class="hidden">
+        <div class="lib-inner">
+          <div class="proj-head"><span class="proj-ico" data-icon="folder"></span><input id="proj-name" class="proj-name" /><button class="icon-btn" id="proj-del" title="删除项目" data-icon="trash"></button></div>
+          <div id="proj-slot"></div>
+          <div class="proj-grid">
+            <div class="proj-box"><div class="proj-box-head">项目指令<span class="muted" id="proj-saved"></span></div>
+              <textarea id="proj-instr" rows="5" placeholder="对这个项目中每个任务都适用的要求，例如：使用正式书面语、遵循附件中的品牌规范……"></textarea></div>
+            <div class="proj-box"><div class="proj-box-head">项目文件<label class="btn ghost sm">上传<input type="file" id="proj-upload" multiple hidden /></label></div><div id="proj-files"></div></div>
+          </div>
+          <div class="nav-section" style="padding-left:0">项目中的任务</div>
+          <div id="proj-tasks"></div>
         </div>
       </div>
 

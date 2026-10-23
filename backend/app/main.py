@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, connectors, llm, providers, scheduler as scheduler_mod, session as session_mod
+from . import config, connectors, llm, projects, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -36,6 +36,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     session_mod.store = session_mod.SessionStore()
+    projects.store = projects.Projects()
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
     connectors.manager = connectors.Connectors()
@@ -65,8 +66,13 @@ async def list_sessions():
 
 
 @app.post("/api/sessions")
-async def create_session():
-    return session_mod.store.create().meta()
+async def create_session(body: dict | None = None):
+    s = session_mod.store.create()
+    pid = (body or {}).get("projectId")
+    if pid and projects.store and pid in projects.store.items:
+        s.project_id = pid
+        s.persist()
+    return s.meta()
 
 
 @app.get("/api/sessions/{sid}")
@@ -124,6 +130,69 @@ async def download(sid: str, path: str):
         raise HTTPException(r.status_code, "file not found")
     return Response(r.content, media_type=r.headers.get("content-type", "application/octet-stream"),
                     headers={"Content-Disposition": _disposition(name)})
+
+
+# ------------------------------------------------------------- projects (项目) ---
+
+def _project(pid: str) -> dict:
+    if pid not in projects.store.items:
+        raise HTTPException(404, "project not found")
+    return projects.store.items[pid]
+
+
+@app.get("/api/projects")
+async def list_projects():
+    return projects.store.list()
+
+
+@app.post("/api/projects")
+async def create_project(body: dict):
+    try:
+        return projects.store.create(body.get("name", ""), body.get("instructions", ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/api/projects/{pid}")
+async def update_project(pid: str, body: dict):
+    _project(pid)
+    return projects.store.update(pid, body)
+
+
+@app.delete("/api/projects/{pid}")
+async def delete_project(pid: str):
+    _project(pid)
+    projects.store.delete(pid)
+    for s in session_mod.store.sessions.values():  # tasks stay, just leave the project
+        if s.project_id == pid:
+            s.project_id = None
+            s.persist()
+    return {"ok": True}
+
+
+@app.post("/api/projects/{pid}/files")
+async def upload_project_file(pid: str, file: UploadFile = File(...)):
+    _project(pid)
+    try:
+        return projects.store.add_file(pid, file.filename or "file", await file.read())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/projects/{pid}/files/{name}")
+async def project_file(pid: str, name: str):
+    _project(pid)
+    f = projects.store.file_path(pid, name)
+    if not f:
+        raise HTTPException(404, "file not found")
+    return FileResponse(f, headers={"Content-Disposition": _disposition(f.name)})
+
+
+@app.delete("/api/projects/{pid}/files/{name}")
+async def delete_project_file(pid: str, name: str):
+    _project(pid)
+    projects.store.remove_file(pid, name)
+    return projects.store.view(projects.store.items[pid])
 
 
 # ------------------------------------------------------------- share (read-only replay) ---

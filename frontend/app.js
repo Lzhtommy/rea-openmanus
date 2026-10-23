@@ -54,6 +54,7 @@ const ICONS = {
   play2: '<path d="M6 4l14 8-14 8z"/>',
   flex: '<circle cx="9" cy="14" r="5.5"/><circle cx="15" cy="10" r="5.5"/>',
   plug: '<path d="M12 22v-5M9 8V2M15 8V2M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z"/>',
+  folderPlus: '<path d="M12 10v6M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   library: '<path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"/>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   paperclip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 0 1 5.7 5.7l-8.6 8.6a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
@@ -105,7 +106,7 @@ const zh = (a) => ACTION_ZH[a] || a || "";
 // ------------------------------------------------------------------ state ---
 const S = {
   models: { modes: [], providers: [], gatewayModels: [] }, modelSel: null, modeMenu: false,
-  conns: [], editingConn: null,
+  conns: [], editingConn: null, projects: [], projectId: null,
   view: "home", library: [], libFilter: "all", libQuery: "", schedules: [], editing: null,
   sessions: [], cfg: {}, current: null, ws: null, lastSeq: {}, replaying: false, filter: "",
   title: "", status: "idle", live: "", plan: [], planOpen: false,
@@ -232,7 +233,9 @@ function scheduleRender(scrollEnd = false) {
 
 function renderAll() {
   const auto = S.view === "automations", conn = S.view === "connectors";
-  const lib = S.view === "library" || auto || conn; // full-page views without a composer dock
+  const proj = S.view === "project";
+  const lib = S.view === "library" || auto || conn || proj; // full-page views without a composer dock
+  $("#project-view").classList.toggle("hidden", !proj);
   const home = !S.current && !lib;
   $("#home").classList.toggle("hidden", !home);
   $("#library").classList.toggle("hidden", S.view !== "library");
@@ -243,8 +246,8 @@ function renderAll() {
   $("#scroller").classList.toggle("hidden", home || lib);
   $("#dock").classList.toggle("hidden", home || lib);
   $("#nav-library").classList.toggle("active", S.view === "library");
-  (home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  const title = conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  (proj ? $("#proj-slot") : home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
+  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   renderModeButton();
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
@@ -252,6 +255,7 @@ function renderAll() {
   $("#panel-btn").classList.toggle("hidden", home || lib || !S.steps.length || S.panel.open);
   if (auto) { renderAutomations(); renderPanel(); return; }
   if (conn) { renderConnectors(); renderPanel(); return; }
+  if (proj) { renderProject(); renderPanel(); return; }
   if (lib) { renderLibrary(); renderPanel(); return; }
   if (home) { renderPanel(); return; }
 
@@ -653,6 +657,36 @@ function toggleTakeover() {
   refreshSel();
 }
 
+// ------------------------------------------------------------------ projects (项目) ---
+async function loadProjects() {
+  try { S.projects = await (await fetch("/api/projects")).json(); } catch { S.projects = []; }
+  $("#project-list").innerHTML = S.projects.map((p) => `<div class="session-item ${S.view === "project" && S.projectId === p.id ? "active" : ""}" data-project="${esc(p.id)}">` +
+    `<span class="s-ico">${icon("folder")}</span><span class="s-title">${esc(p.name)}</span></div>`).join("");
+}
+function openProject(pid) {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "project"; S.projectId = pid;
+  history.replaceState(null, "", `#project/${pid}`);
+  renderSessions(); loadProjects().then(() => scheduleRender());
+}
+function renderProject() {
+  const p = S.projects.find((x) => x.id === S.projectId);
+  if (!p) return;
+  if (document.activeElement !== $("#proj-name")) $("#proj-name").value = p.name;
+  if (document.activeElement !== $("#proj-instr")) $("#proj-instr").value = p.instructions || "";
+  $("#input").placeholder = `在「${p.name}」中新建任务`;
+  $("#proj-files").innerHTML = p.files.length ? p.files.map((f) => { const [ic, cls] = fileIconCls(f.name);
+    return `<div class="proj-file"><span class="fc-ico ${cls}">${icon(ic)}</span><a href="${esc(f.url)}" target="_blank">${esc(f.name)}</a><span class="muted">${fmtSize(f.size)}</span><button class="icon-btn sm" data-rmfile="${esc(f.name)}" title="移除">${icon("x")}</button></div>`; }).join("")
+    : `<div class="small-pad">上传的文件会在该项目的每个任务开始时复制到沙箱的 ~/project/ 目录</div>`;
+  const tasks = S.sessions.filter((x) => x.projectId === p.id);
+  $("#proj-tasks").innerHTML = tasks.length ? tasks.map((x) => `<div class="session-item" data-id="${esc(x.id)}"><span class="s-ico">${icon("message")}</span><span class="s-title">${esc(x.title)}</span></div>`).join("")
+    : `<div class="small-pad">还没有任务，在上方输入框中分配一个</div>`;
+}
+async function saveProject(patch) {
+  const r = await fetch(`/api/projects/${S.projectId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+  if (r.ok) { $("#proj-saved").textContent = "已保存"; setTimeout(() => ($("#proj-saved").textContent = ""), 1500); await loadProjects(); scheduleRender(); }
+}
+
 // ------------------------------------------------------------------ connectors (MCP) ---
 async function openConnectors() {
   if (S.current) send({ type: "leave_session", sessionId: S.current });
@@ -1042,7 +1076,8 @@ function goHome() { openSession(null); $("#input").focus(); }
 
 async function ensureSession() {
   if (S.current) return S.current;
-  const s = await (await fetch("/api/sessions", { method: "POST" })).json();
+  const projectId = S.view === "project" ? S.projectId : null; // a task started from a project page joins it
+  const s = await (await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) })).json();
   S.sessions.unshift(s);
   openSession(s.id);
   return s.id;
@@ -1099,6 +1134,21 @@ function bind() {
     if (e.target.closest("#share-bar-copy")) navigator.clipboard?.writeText(location.href).then(() => (e.target.closest("button").lastChild.textContent = "已复制"));
   });
   $("#nav-conn").onclick = openConnectors;
+  $("#new-project").onclick = async () => {
+    const name = prompt("项目名称"); if (!name?.trim()) return;
+    const r = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    if (r.ok) { const p = await r.json(); await loadProjects(); openProject(p.id); }
+  };
+  $("#project-list").onclick = (e) => { const it = e.target.closest("[data-project]"); if (it) openProject(it.dataset.project); };
+  $("#proj-tasks").onclick = (e) => { const it = e.target.closest("[data-id]"); if (it) openSession(it.dataset.id); };
+  $("#proj-name").onchange = (e) => saveProject({ name: e.target.value });
+  $("#proj-instr").onchange = (e) => saveProject({ instructions: e.target.value });
+  $("#proj-del").onclick = async () => { if (!confirm("删除该项目？项目中的任务会保留。")) return; await fetch(`/api/projects/${S.projectId}`, { method: "DELETE" }); await loadProjects(); goHome(); };
+  $("#proj-upload").onchange = async (e) => {
+    for (const f of e.target.files) { const fd = new FormData(); fd.append("file", f); await fetch(`/api/projects/${S.projectId}/files`, { method: "POST", body: fd }); }
+    e.target.value = ""; await loadProjects(); scheduleRender();
+  };
+  $("#proj-files").onclick = async (e) => { const b = e.target.closest("[data-rmfile]"); if (!b) return; await fetch(`/api/projects/${S.projectId}/files/${encodeURIComponent(b.dataset.rmfile)}`, { method: "DELETE" }); await loadProjects(); scheduleRender(); };
   $("#conn-new").onclick = () => openConnForm(null);
   $("#conn-list").onclick = (e) => { const b = e.target.closest("[data-conn]"); if (b) connAction(b.dataset.conn, b.dataset.id); };
   $("#conn-form").onsubmit = saveConn;
@@ -1256,6 +1306,7 @@ async function deleteSession(sid) {
   try {
     S.cfg = await (await fetch("/api/config")).json();
     await loadModels();
+    await loadProjects();
     $("#config-info").textContent = `${shortModel(S.cfg.model)} · ${S.cfg.sandbox} 沙箱`;
   } catch { /* backend not reachable yet */ }
   await refreshSessions();
@@ -1264,6 +1315,7 @@ async function deleteSession(sid) {
   if (sid === "library") openLibrary();
   else if (sid === "automations") openAutomations();
   else if (sid === "connectors") openConnectors();
+  else if (sid.startsWith("project/")) openProject(sid.slice(8));
   else openSession(sid && S.sessions.some((s) => s.id === sid) ? sid : null);
   autoGrow();
 })();
