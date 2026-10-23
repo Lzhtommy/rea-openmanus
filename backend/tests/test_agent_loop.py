@@ -428,6 +428,32 @@ async def test_mcp_connector(store, monkeypatch, tmp_path):
     connectors.manager = None
 
 
+@pytest.mark.asyncio
+async def test_share_link(store):
+    """A share link exposes the task read-only, with file access scoped to that task, until revoked."""
+    import json as _json
+    from fastapi import HTTPException
+    from app import main
+    s = store.create()
+    sb = await manager.get(s.session_id)
+    path = f"{sb.workdir}/report.md"
+    await sb.call("/file/write", {"file": path, "content": "# shared"})
+    await s.keep_file(path, "deliverable")
+    await s.emit({"type": "chat", "sender": "assistant", "messageType": "text", "content": "done",
+                  "attachments": [{"path": path, "filename": "report.md", "url": s.file_url(path)}]})
+    token = (await main.create_share(s.session_id))["token"]
+    assert (await main.create_share(s.session_id))["token"] == token  # idempotent
+    body = _json.loads((await main.get_share(token)).body)
+    url = body["events"][-1]["attachments"][0]["url"]
+    assert url.startswith(f"/api/share/{token}/files") and "/api/sessions/" not in _json.dumps(body)
+    assert (await main.share_file(token, path)).status_code == 200
+    with pytest.raises(HTTPException):
+        await main.share_file(token, "/etc/passwd")
+    await main.revoke_share(s.session_id)
+    with pytest.raises(HTTPException):
+        await main.get_share(token)
+
+
 def teardown_module():
     for proc in manager.local_procs.values():
         if proc.returncode is None:

@@ -478,6 +478,17 @@ body.pc-full #main { display: none; }
 .mcp-label { font-size: 12px; color: var(--text-tertiary); margin: 10px 0 0; }
 .mcp-out { max-height: none !important; }
 
+/* ------------------------------------------------------------------ share */
+#share-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.share-desc { font-size: 14px; color: var(--text-secondary); line-height: 22px; }
+.share-link { display: flex; gap: 8px; }
+.share-link input { flex: 1; font: 13px var(--font-mono); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-dark); background: var(--bg-card); color: var(--text-primary); }
+body.share-mode #nav, body.share-mode #dock, body.share-mode .head-right > :not(#panel-btn), body.share-mode .mode-btn svg.i { display: none !important; }
+body.share-mode .mode-btn { pointer-events: none; }
+.share-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-top: 8px; border-radius: 12px; background: var(--fill-blue); color: var(--text-secondary); font-size: 14px; }
+.share-bar svg.i { width: 16px; height: 16px; color: var(--text-blue); }
+.share-bar .btn svg.i { color: inherit; width: 12px; height: 12px; }
+
 /* ------------------------------------------------------------------ responsive */
 @media (max-width: 1100px) {
   body.pc-open #main { display: none; }

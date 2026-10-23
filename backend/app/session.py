@@ -39,6 +39,7 @@ class Session(AgentHost):
         self.approved: set[str] = set()
         self.files: dict[str, dict] = {}  # sandbox path -> stored copy (survives the sandbox)
         self.schedule_id: str | None = None  # set when a scheduled task started this session
+        self.share: dict | None = None  # {token, createdAt}: public read-only replay link
         self.connectors_note = ""  # last connector summary told to the agent (re-sent when it changes)
         self.model_selection: dict = {}  # {mode, provider?, model?} chosen in the UI (Manus' mode selector)
         self.task: asyncio.Task | None = None
@@ -54,11 +55,11 @@ class Session(AgentHost):
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
                 "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id,
-                "model": self.model_selection}
+                "model": self.model_selection, "shared": bool(self.share)}
 
     def persist(self) -> None:
         (self.dir / "meta.json").write_text(json.dumps({**self.meta(), "envAnnounced": self.env_announced,
-                                                        "files": self.files}, ensure_ascii=False))
+                                                        "files": self.files, "share": self.share}, ensure_ascii=False))
         (self.dir / "messages.json").write_text(json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
@@ -70,6 +71,7 @@ class Session(AgentHost):
         s.files = meta.get("files", {})
         s.schedule_id = meta.get("scheduleId")
         s.model_selection = meta.get("model") or {}
+        s.share = meta.get("share")
         s.status = meta.get("status", "idle")
         if s.status in ("running", "waiting"):
             s.status = "stopped"  # process restarted mid-run

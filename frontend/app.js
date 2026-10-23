@@ -126,7 +126,7 @@ function resetSession() {
 function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
   S.ws = ws;
-  ws.onopen = () => { if (S.current) join(S.current); };
+  ws.onopen = () => { if (S.current && !S.readonly) join(S.current); };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
   ws.onclose = () => setTimeout(connect, 1500);
 }
@@ -215,7 +215,7 @@ function apply(ev) {
     case "liveStatus": S.live = ev.text || ""; if (lastTurn()) S.dirty.add(lastTurn()); break;
     case "planUpdate": S.plan = ev.tasks || []; break;
     case "title": S.title = ev.title; refreshSessions(); break;
-    case "sandboxUpdate": S.vnc = !!ev.vnc; S.vncFailed = false; break;
+    case "sandboxUpdate": S.vnc = !!ev.vnc && !S.readonly; S.vncFailed = false; break;
     default: return; // explanation: not shown (Manus doesn't render it)
   }
   scheduleRender();
@@ -299,7 +299,8 @@ function renderTurn(t) {
   if (hasAssistant) {
     h += `<div class="assistant"><div class="a-head"><span class="brand-mark">${icon("logo")}</span><span class="brand-word">openmanus</span><span class="badge">${esc(modelBadge())}</span></div>`;
     if (logItems.length || running) {
-      const dur = fmtDur((t.end || Date.now()) - (t.start || Date.now()));
+      const now = S.clockNow || Date.now(); // replays run on the recording's clock
+      const dur = fmtDur((t.end || now) - (t.start || now));
       h += `<button class="worked" data-act="toggle-log" data-turn="${t.id}">${running ? `<span class="spin">${icon("loader")}</span>工作中 · ${dur}` : `工作了 ${dur}`}${icon(open ? "chevDown" : "chevRight")}</button>`;
       if (open) h += `<div class="worklog">${logItems.map((it) => itemHtml(t, it, running && it === t.items[t.items.length - 1])).join("")}</div>`;
     }
@@ -712,6 +713,69 @@ async function connAction(a, id) {
   loadConns();
 }
 
+// ------------------------------------------------------------------ share (read-only replay) ---
+const shareUrl = (token) => `${location.origin}${location.pathname}#share/${token}`;
+function showShareLink(token) {
+  S.shareToken = token;
+  $("#share-link").value = shareUrl(token);
+  $("#share-link-row").classList.remove("hidden");
+  $("#share-create").classList.add("hidden");
+  $("#share-revoke").classList.remove("hidden");
+  $("#share-copy").textContent = "复制";
+}
+async function openShareDialog() {
+  $("#share-err").textContent = "";
+  $("#share-link-row").classList.add("hidden"); $("#share-create").classList.remove("hidden"); $("#share-revoke").classList.add("hidden");
+  $("#share-modal").classList.remove("hidden");
+  const meta = S.sessions.find((x) => x.id === S.current);
+  if (meta?.shared || S.shareToken) {
+    const r = await fetch(`/api/sessions/${S.current}/share`, { method: "POST" }); // idempotent: returns the existing token
+    if (r.ok) showShareLink((await r.json()).token);
+  }
+}
+
+let replayTimer = null;
+async function openShare(token) {
+  S.readonly = true; S.shareToken = token;
+  document.body.classList.add("share-mode");
+  S.current = `share:${token}`; S.view = "session";
+  resetSession();
+  let data;
+  try { const r = await fetch(`/api/share/${token}`); if (!r.ok) throw new Error(); data = await r.json(); }
+  catch { $("#thread").innerHTML = `<div class="lib-empty">${icon("alert")}<div>分享链接不存在或已被取消</div></div>`; $("#scroller").classList.remove("hidden"); return; }
+  S.shareData = data;
+  loadShareEvents(data.events);
+  $("#thread").insertAdjacentHTML("afterbegin", shareBarHtml());
+}
+function shareBarHtml() {
+  return `<div class="share-bar" id="share-bar">${icon("share")}<span>这是一个 OpenManus 任务的只读回放</span><span class="spacer"></span>` +
+    `<button class="btn ghost sm" id="replay-btn">${icon("play2")}回放</button><button class="btn ghost sm" id="share-bar-copy">${icon("copy")}复制链接</button></div>`;
+}
+function loadShareEvents(events) {
+  S.replaying = true;
+  events.forEach(apply);
+  S.replaying = false; S.title = S.shareData.title; S.status = S.shareData.status; S.plan = S.shareData.plan || [];
+  S.modelSel = S.shareData.model?.mode ? S.shareData.model : defaultSel(); // the task's own mode, not the viewer's
+  scheduleRender(true);
+}
+function replayShare() {
+  clearTimeout(replayTimer);
+  const evs = S.shareData.events;
+  resetSession(); S.status = "running";
+  $("#thread").innerHTML = shareBarHtml();
+  S.panel.open = window.innerWidth >= 1100;
+  let i = 0;
+  const step = () => {
+    if (i >= evs.length) { S.status = S.shareData.status; S.clockNow = null; scheduleRender(); return; }
+    const ev = evs[i++];
+    S.clockNow = ev.timestamp;
+    apply(ev);
+    const gap = i < evs.length ? evs[i].timestamp - ev.timestamp : 0;
+    replayTimer = setTimeout(step, Math.max(60, Math.min(gap, 900)));
+  };
+  step();
+}
+
 // ------------------------------------------------------------------ modes & Flex (Manus' mode selector) ---
 // Max / standard / Lite run on the gateway; Flex runs on any configured provider with your own key.
 const defaultSel = () => ({ mode: S.models.default || "standard" });
@@ -1021,6 +1085,10 @@ function bind() {
   const newTask = () => goHome();
   $("#new-task").onclick = newTask; $("#new-task-2").onclick = newTask;
   $("#nav-library").onclick = openLibrary;
+  $("#thread").addEventListener("click", (e) => {
+    if (e.target.closest("#replay-btn")) replayShare();
+    if (e.target.closest("#share-bar-copy")) navigator.clipboard?.writeText(location.href).then(() => (e.target.closest("button").lastChild.textContent = "已复制"));
+  });
   $("#nav-conn").onclick = openConnectors;
   $("#conn-new").onclick = () => openConnForm(null);
   $("#conn-list").onclick = (e) => { const b = e.target.closest("[data-conn]"); if (b) connAction(b.dataset.conn, b.dataset.id); };
@@ -1080,7 +1148,19 @@ function bind() {
   $("#search-btn").onclick = () => { const n = $("#nav-search"); n.classList.toggle("hidden"); if (!n.classList.contains("hidden")) $("#search-input").focus(); else { S.filter = ""; $("#search-input").value = ""; renderSessions(); } };
   $("#search-input").oninput = (e) => { S.filter = e.target.value; renderSessions(); };
   $("#theme-btn").onclick = () => { const cur = store.get("theme", "auto"); const next = THEMES[(THEMES.indexOf(cur) + 1) % 3]; store.set("theme", next); applyTheme(next); };
-  $("#share-btn").onclick = async () => { try { await navigator.clipboard.writeText(location.href); $("#share-btn").title = "已复制链接"; } catch { prompt("复制链接", location.href); } };
+  $("#share-btn").onclick = openShareDialog;
+  $("#share-close").onclick = () => $("#share-modal").classList.add("hidden");
+  $("#share-create").onclick = async () => {
+    const r = await fetch(`/api/sessions/${S.current}/share`, { method: "POST" });
+    if (!r.ok) { $("#share-err").textContent = "创建失败"; return; }
+    showShareLink((await r.json()).token);
+  };
+  $("#share-revoke").onclick = async () => {
+    if (!confirm("取消分享后，已发出的链接将立即失效。")) return;
+    await fetch(`/api/sessions/${S.current}/share`, { method: "DELETE" });
+    S.shareToken = null; openShareDialog();
+  };
+  $("#share-copy").onclick = async () => { const v = $("#share-link").value; try { await navigator.clipboard.writeText(v); $("#share-copy").textContent = "已复制"; } catch { $("#share-link").select(); } };
   $("#delete-btn").onclick = () => S.current && deleteSession(S.current);
   $("#panel-btn").onclick = () => { S.panel.open = true; S.panel.userClosed = false; scheduleRender(); };
   const closePanel = () => { S.panel.open = false; S.panel.userClosed = true; S.panel.full = false; S.panel.takeover = false; scheduleRender(); };
@@ -1108,14 +1188,14 @@ function bind() {
       case "toggle-log": t.open = !(t.open ?? (!isFinished(t) || finalIndex(t) < 0)); rerender(t); break;
       case "toggle-group": { const it = t.items.find((x) => x.id === a.dataset.group); const isCur = !isFinished(t) && it === t.items[t.items.length - 1]; t.groupOpen[a.dataset.group] = !(t.groupOpen[a.dataset.group] ?? isCur); rerender(t); break; }
       case "step": S.panel.open = true; S.panel.userClosed = false; S.panel.file = null; S.panel.sel = a.dataset.id === S.steps[S.steps.length - 1]?.actionId ? null : a.dataset.id; refreshSel(); break;
-      case "suggest": submit(t.suggestions[+a.dataset.i].content); break;
+      case "suggest": if (!S.readonly) submit(t.suggestions[+a.dataset.i].content); break;
       case "copy": { const fi = finalIndex(t); if (fi >= 0) navigator.clipboard?.writeText(t.items.slice(fi).filter((x) => x.kind === "chat").map((x) => x.ev.content).join("\n\n")); break; }
       case "open-file": if (e.target.closest("a[download]")) return; S.panel.open = true; S.panel.userClosed = false; S.panel.file = { url: a.dataset.url, name: a.dataset.name, path: a.dataset.path }; refreshSel(); break;
       case "plan": e.stopPropagation(); S.planOpen = !S.planOpen; renderTaskbar(); return;
-      case "takeover": toggleTakeover(); break;
+      case "takeover": if (!S.readonly) toggleTakeover(); break;
       case "confirm": {
         const s = S.steps[S.stepIdx[a.dataset.id]];
-        if (!s || s._answered) break;
+        if (!s || s._answered || S.readonly) break;
         s._answered = true;
         send({ type: "confirm_action", sessionId: S.current, actionId: a.dataset.id, approved: a.dataset.ok === "1" });
         rerender(s.turn);
@@ -1164,6 +1244,7 @@ async function deleteSession(sid) {
   } catch { /* backend not reachable yet */ }
   await refreshSessions();
   const sid = location.hash.slice(1);
+  if (sid.startsWith("share/")) { openShare(sid.slice(6)); return; }
   if (sid === "library") openLibrary();
   else if (sid === "automations") openAutomations();
   else if (sid === "connectors") openConnectors();
