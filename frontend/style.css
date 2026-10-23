@@ -679,3 +679,11 @@ textarea.code-edit { font: 13px/20px var(--font-mono); min-height: 52vh; }
 .pcv-cmd input { flex: 1; font: 13px/20px var(--font-mono); padding: 8px 10px; border: 1px solid var(--border-dark); border-radius: 8px; background: var(--bg-white); color: var(--text-primary); outline: none; }
 .chip-file.target { background: var(--fill-light); }
 .pc-chip { margin-left: 8px; display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; } .pc-chip svg.i { width: 11px; height: 11px; }
+
+/* ---- devices */
+#devnew-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.devnew-card { width: min(720px, 100%); }
+.devnew-card .hook-url code { white-space: normal; word-break: break-all; }
+.dev-card .sk-desc code { font: 12px var(--font-mono); background: var(--fill-light); padding: 1px 6px; border-radius: 4px; }
+.dev-trust { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+#devnew-status { display: inline-flex; align-items: center; gap: 6px; }

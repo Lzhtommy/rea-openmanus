@@ -25,7 +25,8 @@ class SandboxError(Exception):
 class Sandbox:
     """Client for one running sandbox server."""
 
-    def __init__(self, session_id: str, base_url: str, workdir: str, mode: str):
+    def __init__(self, session_id: str, base_url: str, workdir: str, mode: str,
+                 transport: httpx.AsyncBaseTransport | None = None):
         self.session_id = session_id
         self.base_url = base_url
         self.workdir = workdir
@@ -33,11 +34,16 @@ class Sandbox:
         self.info: dict = {}  # /health payload: vnc availability, screen size
         self.last_used = time.monotonic()
         self.viewers = 0  # live-screen (VNC) connections: a watched sandbox is never reclaimed
-        self.http = httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(660, connect=10))
+        self.http = httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(660, connect=10), transport=transport)
 
     @property
     def vnc(self) -> bool:
         return bool(self.info.get("vnc"))
+
+    @property
+    def skills_dir(self) -> str:
+        """Where skills are installed: hidden on the user's own computer, ~/skills in a sandbox."""
+        return f"{self.workdir}/.openmanus/skills" if self.mode == "device" else f"{self.workdir}/skills"
 
     @property
     def ws_url(self) -> str:
@@ -111,8 +117,11 @@ class SandboxManager:
             if sb:
                 sb.touch()
                 return sb
-            sb = await (self._start_docker(session_id) if config.SANDBOX_MODE == "docker"
-                        else self._start_local(session_id))
+            if session_id.startswith("dev-"):
+                sb = await self._start_device(session_id)
+            else:
+                sb = await (self._start_docker(session_id) if config.SANDBOX_MODE == "docker"
+                            else self._start_local(session_id))
             self.sandboxes[session_id] = sb
             return sb
 
@@ -154,6 +163,19 @@ class SandboxManager:
         log.warning("LOCAL sandbox for %s at %s — commands run on the host, dev use only", sid, ws)
         return sb
 
+    async def _start_device(self, sid: str) -> Sandbox:
+        """The user's own computer, reached through the device connector's WebSocket."""
+        from . import devices
+        did = sid.removeprefix("dev-")
+        live = devices.store.live.get(did) if devices.store else None
+        if not live:
+            raise SandboxError("设备离线：请在这台电脑上启动 OpenManus 连接器（见「电脑」页面）")
+        self.specs[sid] = {"idle_minutes": 0}  # nothing to reclaim: it is the user's machine
+        sb = Sandbox(sid, "http://device", live.hello.get("workdir") or "~", "device", transport=devices.DeviceTransport(did))
+        await sb.wait_ready(15)
+        log.info("device %s attached (%s)", did, live.hello.get("os"))
+        return sb
+
     # ---------------------------------------------------------- idle reclaim ---
     async def reap(self, idle_seconds: float | None = None) -> list[str]:
         """Stop sandboxes nobody used for a while (container stopped, not removed; files stay)."""
@@ -191,7 +213,7 @@ class SandboxManager:
                 await sb.close()
             except Exception:  # never let a broken client keep a sandbox running
                 pass
-        if config.SANDBOX_MODE == "docker":
+        if config.SANDBOX_MODE == "docker" and not sid.startswith("dev-"):
             try:
                 await _run("docker", "stop", "-t", "3", f"manus-sbx-{sid}")
             except SandboxError as e:
@@ -214,7 +236,7 @@ class SandboxManager:
         sb = self.sandboxes.pop(sid, None)
         if sb:
             await sb.close()
-        if config.SANDBOX_MODE == "docker":
+        if config.SANDBOX_MODE == "docker" and not sid.startswith("dev-"):
             try:
                 await _run("docker", "rm", "-f", f"manus-sbx-{sid}")
             except SandboxError:

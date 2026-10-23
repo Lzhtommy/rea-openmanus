@@ -253,18 +253,18 @@ class Agent:
     async def _approved(self, name: str, args: dict, base: dict, silent: bool) -> bool:
         """Hold actions with outside effects until the user approves them in the UI."""
         reason = needs_confirm(name, args)
+        dev = getattr(self.host, "local_device", None)
+        if dev and not dev.get("autoApprove") and name in LOCAL_CONFIRM:  # Manus' confirm_local_terminal_execution
+            reason = reason or LOCAL_CONFIRM[name]
         if name == "mcp_call_tool" and connectors.manager:
             reason = connectors.manager.needs_confirm(str(args.get("tool", "")))
         if not config.CONFIRM_ENABLED or not reason:
             return True
-        key = f"{name}:{args.get('port') or args.get('command') or args.get('input') or args.get('tool')}"
+        key = f"{name}:{args.get('port') or args.get('command') or args.get('input') or args.get('tool') or args.get('file')}"
         if key in self.host.approved:  # same action already approved in this session
             return True
         await self.host.emit({**base, "id": base["actionId"], "status": "need_confirm",
-                              "confirm": {"reason": reason, "command": args.get("command") or args.get("input") or
-                                          (f"{args.get('path')}  →  「{args.get('title', '')}」" if name == "deploy_publish" else "") or
-                                          (json.dumps(args.get("arguments") or {}, ensure_ascii=False, indent=1) if name == "mcp_call_tool" else ""),
-                                          "port": args.get("port")}})
+                              "confirm": {"reason": reason, "command": _confirm_preview(name, args), "port": args.get("port")}})
         approved = await self.host.confirm(base["actionId"])
         if approved:
             self.host.approved.add(key)
@@ -330,7 +330,7 @@ class Agent:
         # ---- files
         if name == "file_read":
             r = await sb.call("/file/read", a)
-            if m := re.fullmatch(rf"{re.escape(sb.workdir)}/skills/([\w-]+)/SKILL\.md", r["file"]):
+            if m := re.fullmatch(rf"{re.escape(sb.skills_dir)}/([\w-]+)/SKILL\.md", r["file"]):
                 host.skill_used(m.group(1))
             return ToolOutcome(f"{r['file']} ({r['total_lines']} lines):\n{r['content']}",
                                {"textEditor": {"path": r["file"], "content": r["content"][:50000], "op": "read"}})
@@ -666,6 +666,26 @@ def _preview(data: bytes, side: int = 768) -> str:
     buf = io.BytesIO()
     im.save(buf, "JPEG", quality=80)
     return base64.b64encode(buf.getvalue()).decode()
+
+
+def _confirm_preview(name: str, args: dict) -> str:
+    """What the user is asked to approve, shown on the confirmation card."""
+    if name == "deploy_publish":
+        return f"{args.get('path')}  →  「{args.get('title', '')}」"
+    if name == "mcp_call_tool":
+        return json.dumps(args.get("arguments") or {}, ensure_ascii=False, indent=1)
+    if name == "file_write":
+        return f"{args.get('file')}\n\n{str(args.get('content', ''))[:1500]}"
+    if name == "file_str_replace":
+        return f"{args.get('file')}\n\n- {str(args.get('old_str', ''))[:700]}\n+ {str(args.get('new_str', ''))[:700]}"
+    if name == "shell_kill_process":
+        return f"shell {args.get('id', 'default')}"
+    return args.get("command") or args.get("input") or ""
+
+
+LOCAL_CONFIRM = {"shell_exec": "在你的电脑上执行命令", "shell_write_to_process": "向你电脑上的进程输入内容",
+                 "shell_kill_process": "结束你电脑上的进程", "file_write": "在你的电脑上写入文件",
+                 "file_str_replace": "修改你电脑上的文件"}
 
 
 def render_plan(plan: list[dict]) -> str:

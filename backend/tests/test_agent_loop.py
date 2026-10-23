@@ -98,7 +98,7 @@ async def wait_status(s, statuses, timeout=60):
         if s.status in statuses and (not s.task or s.task.done() or s.status == "waiting"):
             return
         await asyncio.sleep(0.1)
-    raise AssertionError(f"status stuck at {s.status}")
+    raise AssertionError(f"status stuck at {s.status}: {[(e.get("name"), e.get("status")) for e in s.events if e["type"] == "toolUsed"][-4:]}")
 
 
 def assert_valid_history(messages):
@@ -874,3 +874,51 @@ async def test_cloud_computer(store, monkeypatch, tmp_path):
     assert computers.store.update(c["id"], {"ports": [{"port": 3000}]})["ports"][0]["url"].startswith(f"http://pc-{c['id']}-3000.")
     await main.delete_computer(c["id"])
     assert sbid not in manager.sandboxes and a.computer_id is None
+
+
+@pytest.mark.asyncio
+async def test_device_tunnel(store, monkeypatch, tmp_path):
+    """A task on a connected device reaches its action server through the tunnel; commands need approval."""
+    import base64 as b64
+    import json as _json
+    from app import devices, main
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    devices.store = devices.Devices()
+    d, token = devices.store.create("测试笔记本")
+    assert devices.store.by_token(token)["id"] == d["id"] and "tokenHash" not in d
+    backing = await manager.get("device-backing")  # stands in for the action server on the user's machine
+
+    class FakeWS:  # the connector's side of the socket
+        async def send_text(self, raw):
+            m = _json.loads(raw)
+            r = await backing.http.request(m["method"], m["path"], headers=m["headers"], content=b64.b64decode(m["body"]))
+            live.resolve({"id": m["id"], "status": r.status_code, "headers": dict(r.headers), "body": b64.b64encode(r.content).decode()})
+    live = devices.store.attach(d["id"], FakeWS(), {"os": "Darwin 25", "workdir": backing.workdir, "myBrowser": False})
+    model = ScriptedModel([msg(tool("shell_exec", command="echo from-the-device")),
+                           msg(tool("file_write", file="note.txt", content="hi")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.get((await main.create_session({"deviceId": d["id"]}))["id"])
+    assert s.sandbox_id == f"dev-{d['id']}"
+    await s.user_message("看看我的电脑", [])
+    done = set()
+    for _ in range(2):  # each command / file change is held for approval
+        for _ in range(200):
+            fresh = [a for a, f in s.pending_confirms.items() if a not in done and not f.done()]
+            if fresh:
+                break
+            await asyncio.sleep(0.05)
+        held = next(e for e in reversed(s.events) if e.get("status") == "need_confirm")
+        assert held["confirm"]["reason"].startswith(("在你的电脑上执行命令", "在你的电脑上写入文件"))
+        done.add(fresh[0])
+        s.resolve_confirm(fresh[0], True)
+    await wait_status(s, {"idle"})
+    out = next(e for e in s.events if e.get("name") == "shell_exec" and e["status"] == "success")
+    assert "from-the-device" in out["detail"]["terminal"]["output"]
+    assert "USER'S OWN COMPUTER" in next(m["content"] for m in s.messages if m["role"] == "system")
+    devices.store.update(d["id"], {"autoApprove": True})  # a trusted device runs without asking
+    model.script += [msg(tool("shell_exec", command="echo trusted")), msg(tool("idle"))]
+    await s.user_message("再来一次", [])
+    await wait_status(s, {"idle"})
+    devices.store.detach(d["id"], live)
+    with pytest.raises(Exception):
+        await manager.sandboxes[s.sandbox_id].call("/shell/view", {"id": "default"})  # offline now

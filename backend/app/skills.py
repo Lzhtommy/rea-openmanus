@@ -337,10 +337,10 @@ class Skills:
                 if p.is_file():
                     rel = p.relative_to(s.path)
                     await sandbox.http.post("/file/upload", files={"file": (rel.name, p.read_bytes())},
-                                            data={"dir": f"{sandbox.workdir}/skills/{s.name}/{rel.parent}".rstrip("/.")})
+                                            data={"dir": f"{sandbox.skills_dir}/{s.name}/{rel.parent}".rstrip("/.")})
 
     def catalog(self, sandbox: Sandbox) -> str:
-        rows = "\n".join(f"- {s.name} ({sandbox.workdir}/skills/{s.name}/SKILL.md): {s.description}"
+        rows = "\n".join(f"- {s.name} ({sandbox.skills_dir}/{s.name}/SKILL.md): {s.description}"
                          for s in self.items.values() if self.enabled(s.name))
         return (f"<skills>\nRead a skill's SKILL.md with file_read before starting work it applies to.\n{rows}\n</skills>"
                 if rows else "")

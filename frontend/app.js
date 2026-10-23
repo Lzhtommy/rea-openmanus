@@ -63,6 +63,7 @@ const ICONS = {
   sparkBox: '<rect width="18" height="18" x="3" y="3" rx="4"/><path d="M12 7.5l1.2 3.3 3.3 1.2-3.3 1.2L12 16.5l-1.2-3.3L7.5 12l3.3-1.2z"/>',
   gamepad: '<path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><rect width="20" height="12" x="2" y="6" rx="6"/>',
   phone: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>',
+  laptop: '<rect width="18" height="12" x="3" y="4" rx="2"/><path d="M2 20h20"/>',
   presentation: '<path d="M2 3h20M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3M7 21l5-5 5 5"/>',
   film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M3 12h18M3 16.5h4M17 7.5h4M17 16.5h4"/>',
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
@@ -140,6 +141,7 @@ const S = {
   personal: { profile: {}, instructions: "", knowledge: [] }, persTab: "profile", editingKnow: null,
   plugins: { plugins: [], categories: [] }, plugCat: "all", plugOpen: null, sites: [], crTab: "all",
   pcs: { computers: [], templates: [], unavailable: [], tasks: {} }, pcOpen: null, pcTab: "desktop", target: null,
+  devs: { devices: [], tasks: {} }, pairing: null,
   triggers: [], activity: [], autoTab: "activity", editingTrig: null,
   skills: { skills: [], catalog: [], categories: [] }, skTab: "explore", skCat: "all", skSrc: "all", pickedSkills: [], skillView: null,
 };
@@ -288,7 +290,8 @@ function renderAll() {
   const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : sk ? "技能" : plug ? "插件" : cr ? "创作" : pcv ? "电脑" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   const meta = S.current && S.sessions.find((x) => x.id === S.current);
-  const pcName = meta?.computerId && (S.pcs.computers.find((c) => c.id === meta.computerId)?.name || "云电脑");
+  const pcName = (meta?.computerId && (S.pcs.computers.find((c) => c.id === meta.computerId)?.name || "云电脑")) ||
+    (meta?.deviceId && (S.devs.devices.find((d) => d.id === meta.deviceId)?.name || "本地计算机"));
   if (pcName) $("#session-title").insertAdjacentHTML("beforeend", `<span class="lib-tag pc-chip">${icon("monitor")}${esc(pcName)}</span>`);
   renderModeButton();
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
@@ -706,7 +709,7 @@ function slidesViewHtml(s) {
 function termHtml(t) {
   const lines = String(t.output || "").split("\n").map((l) => {
     const m = l.match(/^(\/\S*)\$ (.*)$/);
-    if (m) return `<span class="cmd"><span class="ps">ubuntu@sandbox:${esc(m[1].replace(/^\/home\/ubuntu/, "~"))}$</span> ${esc(m[2])}</span>`;
+    if (m) return `<span class="cmd"><span class="ps">${S.sessions.find((x) => x.id === S.current)?.deviceId ? "device" : "ubuntu@sandbox"}:${esc(m[1].replace(/^\/home\/ubuntu/, "~"))}$</span> ${esc(m[2])}</span>`;
     return esc(l);
   });
   return `<div class="term">${lines.join("\n")}${t.running ? "\n<span class=\"shimmer\">▍</span>" : ""}</div>`;
@@ -877,7 +880,12 @@ async function openComputers() {
   history.replaceState(null, "", "#computers");
   renderSessions(); await loadComputers();
 }
-async function loadComputers() { try { S.pcs = await (await fetch("/api/computers")).json(); } catch { /* keep */ } scheduleRender(); if (S.pcOpen) renderPcView(); }
+async function loadComputers() {
+  try { [S.pcs, S.devs] = await Promise.all([fetch("/api/computers").then((r) => r.json()), fetch("/api/devices").then((r) => r.json())]); } catch { /* keep */ }
+  scheduleRender(); if (S.pcOpen) renderPcView(); if (S.pairing) renderPairing();
+}
+// A pairing dialog waits for the connector to come online.
+setInterval(() => { if (S.pairing && !S.devs.devices.find((d) => d.id === S.pairing.device.id)?.online) loadComputers(); }, 2500);
 setInterval(() => { if ((S.view === "computers" || S.pcOpen) && S.pcs.computers.some((c) => ["starting", "setting_up"].includes(c.status))) loadComputers(); }, 3000);
 const pcSt = (c) => { const [cls, l] = PC_ST[c.status] || ["", c.status]; return `<span class="conn-st ${cls}"><i></i>${l}</span>`; };
 function renderComputers() {
@@ -885,6 +893,13 @@ function renderComputers() {
   $("#pc-mine").innerHTML = computers.length ? `<div class="nav-section" style="padding-left:0">我的电脑</div><div class="sk-grid">${computers.map((c) =>
     `<div class="sk-card" data-pc="${esc(c.id)}"><div class="sk-top"><span class="auto-ico">${icon("monitor")}</span><div class="sk-title">${esc(c.name)}<div class="sk-name">Linux · ${c.cpus} CPU · ${c.memory} GB${c.autoStop ? ` · 空闲 ${c.autoStop} 分钟关机` : " · 始终在线"}</div></div>${pcSt(c)}</div>` +
     `<div class="sk-meta"><span>${(tasks[c.id] || []).length} 个任务</span>${c.ports.length ? `<span>${c.ports.length} 个开放端口</span>` : ""}<span class="spacer"></span><button class="btn ghost sm" data-pc-task="${esc(c.id)}">${icon("newTask")}新任务</button></div></div>`).join("")}</div>` : "";
+  $("#dev-list").innerHTML = S.devs.devices.length ? `<div class="sk-grid">${S.devs.devices.map((d) =>
+    `<div class="sk-card dev-card"><div class="sk-top"><span class="auto-ico">${icon("laptop")}</span><div class="sk-title">${esc(d.name)}<div class="sk-name">${esc(d.os || "尚未连接")}${d.myBrowser ? " · 使用你的 Chrome" : ""}</div></div>` +
+    `<span class="conn-st ${d.online ? "ok" : ""}"><i></i>${d.online ? "在线" : "离线"}</span></div>` +
+    `<div class="sk-desc" style="min-height:0">${d.workdir ? `工作目录 <code>${esc(d.workdir)}</code>` : "在这台电脑上运行连接器后即可使用"}</div>` +
+    `<div class="sk-meta"><label class="check dev-trust" title="开启后，在这台电脑上执行命令和修改文件不再逐次确认"><input type="checkbox" data-dev-trust="${esc(d.id)}" ${d.autoApprove ? "checked" : ""} />信任此设备</label><span>${(S.devs.tasks[d.id] || []).length} 个任务</span><span class="spacer"></span>` +
+    `<button class="btn ghost sm" data-dev-task="${esc(d.id)}" ${d.online ? "" : "disabled"}>${icon("newTask")}新任务</button><button class="icon-btn sm" data-dev-del="${esc(d.id)}" title="移除">${icon("trash")}</button></div></div>`).join("")}</div>`
+    : `<div class="muted" style="font-size:13px;margin-bottom:8px">还没有连接的设备。连接后，任务可以直接在你的电脑上运行命令、处理本地文件，或使用你自己的浏览器。</div>`;
   $("#pc-templates").innerHTML = templates.map((t) => `<div class="sk-card" data-pc-tpl="${esc(t.id)}"><div class="sk-top"><span class="auto-ico">${icon(t.id === "custom" ? "pencil" : t.id === "gameserver" ? "gamepad" : t.id === "blender" ? "layers" : "monitor")}</span><div class="sk-title">${esc(t.name)}<div class="sk-name">${esc(t.os)}${t.tags.map((x) => ` · ${esc(x)}`).join("")}</div></div></div><div class="sk-desc">${esc(t.description)}</div></div>`).join("") +
     unavailable.map((t) => `<div class="sk-card off" title="暂不支持"><div class="sk-top"><span class="auto-ico">${icon("monitor")}</span><div class="sk-title">${esc(t.name)}<div class="sk-name">${esc(t.os)}${t.tags.map((x) => ` · ${esc(x)}`).join("")}</div></div><span class="lib-tag">暂不支持</span></div><div class="sk-desc">${esc(t.description)}</div></div>`).join("");
 }
@@ -969,6 +984,31 @@ async function pcCall(op) {
   pcVncClose(); await loadComputers();
 }
 function newTaskOn(id) { closePcView(); goHome(); S.target = id; renderAttachments(); $("#input").focus(); }
+
+// ---- devices (连接您的设备)
+async function startPairing() {
+  const r = await fetch("/api/devices", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  S.pairing = { ...(await r.json()), myBrowser: false };
+  await loadComputers();
+  $("#devnew-modal").classList.remove("hidden");
+}
+function renderPairing() {
+  const p = S.pairing, server = p.server.startsWith("http://localhost") || p.server.startsWith("http://127.") ? location.origin : p.server;
+  const online = S.devs.devices.find((d) => d.id === p.device.id)?.online;
+  const run = `python3 openmanus_device.py --server ${server} --token ${p.token}${p.myBrowser ? " --my-browser http://127.0.0.1:9222" : ""}`;
+  const cmd = (label, text) => `<div class="mcp-label">${label}</div><div class="hook-url"><code>${esc(text)}</code><button class="btn ghost sm" data-copy="${esc(text)}">${icon("copy")}复制</button></div>`;
+  if (!$("#devnew-body").dataset.token || $("#devnew-body").dataset.token !== p.token + p.myBrowser) {
+    $("#devnew-body").dataset.token = p.token + p.myBrowser;
+    $("#devnew-body").innerHTML = `<div class="share-desc">在要连接的电脑上打开终端，依次运行下面的命令。连接器只主动向 OpenManus 建立连接，不会在这台电脑上开放端口；OpenManus 在这台电脑上执行每条命令、修改每个文件之前都会先征求你的同意。</div>` +
+      cmd("1. 下载连接器", `curl -fsSLo openmanus_device.py ${server}/api/devices/agent.py`) +
+      cmd("2. 安装依赖（Python 3.10+）", `pip install fastapi "uvicorn[standard]" httpx python-multipart websockets playwright && python3 -m playwright install chromium`) +
+      cmd("3. 运行（令牌只显示这一次）", run) +
+      `<label class="check"><input type="checkbox" id="devnew-mybrowser" ${p.myBrowser ? "checked" : ""} />使用我自己的 Chrome（My Browser：保留你的登录状态）</label>` +
+      (p.myBrowser ? cmd("先用调试端口启动 Chrome（建议使用单独的配置目录）", `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="$HOME/.openmanus-chrome"`) : "");
+  }
+  $("#devnew-status").innerHTML = online ? `<span class="conn-st ok"><i></i>已连接</span>` : `<span class="spin">${icon("loader")}</span>等待这台电脑连接…`;
+}
+function closePairing() { S.pairing = null; $("#devnew-body").dataset.token = ""; $("#devnew-modal").classList.add("hidden"); loadComputers(); }
 
 // ------------------------------------------------------------------ creations (创作) ---
 const CR_KINDS = { website: ["网站", "globe"], game: ["游戏", "gamepad"], app: ["移动应用", "phone"] };
@@ -1702,7 +1742,7 @@ function goHome() { openSession(null); $("#input").focus(); }
 async function ensureSession() {
   if (S.current) return S.current;
   const projectId = S.view === "project" ? S.projectId : null; // a task started from a project page joins it
-  const s = await (await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, computerId: S.target }) })).json();
+  const s = await (await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, ...(S.target?.startsWith("dev:") ? { deviceId: S.target.slice(4) } : { computerId: S.target }) }) })).json();
   S.target = null;
   S.sessions.unshift(s);
   openSession(s.id);
@@ -1725,8 +1765,8 @@ async function submit(text) {
 }
 function autoGrow() { const i = $("#input"); i.style.height = "auto"; i.style.height = Math.min(i.scrollHeight, 240) + "px"; }
 function renderAttachments() {
-  const pc = S.target && S.pcs.computers.find((c) => c.id === S.target);
-  $("#attach-list").innerHTML = (pc ? `<span class="chip-file target">${icon("monitor")}<span>在「${esc(pc.name)}」上运行</span><button type="button" data-rmtarget="1">${icon("x")}</button></span>` : "") + S.pickedSkills.map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span><button type="button" data-rmskill="${esc(n)}">${icon("x")}</button></span>`).join("") + S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
+  const pc = S.target && (S.target.startsWith("dev:") ? S.devs.devices.find((d) => "dev:" + d.id === S.target) : S.pcs.computers.find((c) => c.id === S.target));
+  $("#attach-list").innerHTML = (pc ? `<span class="chip-file target">${icon(S.target.startsWith("dev:") ? "laptop" : "monitor")}<span>在「${esc(pc.name)}」上运行</span><button type="button" data-rmtarget="1">${icon("x")}</button></span>` : "") + S.pickedSkills.map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span><button type="button" data-rmskill="${esc(n)}">${icon("x")}</button></span>`).join("") + S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
 }
 
 // ------------------------------------------------------------------ theme ---
@@ -1753,7 +1793,8 @@ function bind() {
   $("#plus-target").onclick = async (e) => {
     e.stopPropagation(); await loadComputers();
     $("#target-pick").innerHTML = `<label class="mode-item"><input type="radio" name="tgt" value="" ${S.target ? "" : "checked"} /><span class="grow">云沙箱<span class="muted"> 每个任务独立</span></span></label>` +
-      S.pcs.computers.map((c) => `<label class="mode-item"><input type="radio" name="tgt" value="${esc(c.id)}" ${S.target === c.id ? "checked" : ""} /><span class="grow">${esc(c.name)}<span class="muted"> ${esc((PC_ST[c.status] || [, ""])[1])}</span></span></label>`).join("") +
+      S.pcs.computers.map((c) => `<label class="mode-item"><input type="radio" name="tgt" value="${esc(c.id)}" ${S.target === c.id ? "checked" : ""} /><span class="grow">${esc(c.name)}<span class="muted"> 云电脑 · ${esc((PC_ST[c.status] || [, ""])[1])}</span></span></label>`).join("") +
+      S.devs.devices.map((d) => `<label class="mode-item ${d.online ? "" : "muted"}"><input type="radio" name="tgt" value="dev:${esc(d.id)}" ${S.target === "dev:" + d.id ? "checked" : ""} ${d.online ? "" : "disabled"} /><span class="grow">${esc(d.name)}<span class="muted"> 本地计算机 · ${d.online ? "在线" : "离线"}</span></span></label>`).join("") +
       `<button type="button" class="mode-item muted" id="tgt-manage">${icon("plus")}创建云电脑</button>`;
     $("#target-pick").classList.toggle("hidden");
   };
@@ -1786,6 +1827,20 @@ function bind() {
   $("#pc-templates").onclick = (e) => { const t = e.target.closest("[data-pc-tpl]"); if (t) openPcNew(t.dataset.pcTpl); };
   $("#pc-mine").onclick = (e) => { const t = e.target.closest("[data-pc-task]"); if (t) { e.stopPropagation(); return newTaskOn(t.dataset.pcTask); } const c = e.target.closest("[data-pc]"); if (c) openPcView(c.dataset.pc, "desktop"); };
   $("#pcnew-form").onsubmit = savePcNew;
+  $("#dev-new").onclick = startPairing;
+  $("#devnew-close").onclick = $("#devnew-done").onclick = closePairing;
+  $("#devnew-body").addEventListener("click", async (e) => { const b = e.target.closest("[data-copy]"); if (b) { try { await navigator.clipboard.writeText(b.dataset.copy); b.lastChild.textContent = "已复制"; } catch { /* ignore */ } } });
+  $("#devnew-body").addEventListener("change", (e) => { if (e.target.id === "devnew-mybrowser") { S.pairing.myBrowser = e.target.checked; renderPairing(); } });
+  $("#dev-list").addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-dev-task]"); if (t) return newTaskOn("dev:" + t.dataset.devTask);
+    const del = e.target.closest("[data-dev-del]");
+    if (del && confirm("移除这台设备？它的连接器会立即断开，需要重新连接才能再使用。")) { await fetch(`/api/devices/${del.dataset.devDel}`, { method: "DELETE" }); loadComputers(); }
+  });
+  $("#dev-list").addEventListener("change", async (e) => {
+    const t = e.target.closest("[data-dev-trust]"); if (!t) return;
+    if (t.checked && !confirm("信任后，OpenManus 在这台电脑上执行命令和修改文件将不再逐次征求你的同意。确定吗？")) { t.checked = false; return; }
+    await fetch(`/api/devices/${t.dataset.devTrust}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoApprove: t.checked }) }); loadComputers();
+  });
   $("#pcnew-form").template.onchange = syncPcNew;
   $("#pcnew-close").onclick = $("#pcnew-cancel").onclick = () => $("#pcnew-modal").classList.add("hidden");
   $("#pcv-close").onclick = closePcView;

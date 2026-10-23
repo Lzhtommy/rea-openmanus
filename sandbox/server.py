@@ -13,6 +13,7 @@ import fnmatch
 import os
 import re
 import signal
+import sys
 import time
 from pathlib import Path
 
@@ -320,6 +321,9 @@ TEXT_JS = r"""
 # With a display (Docker image: Xvfb on :99, exported over VNC) the agent's browser runs headed so the
 # user can watch it live and take over; without one (local dev) it runs headless.
 HEADED = bool(os.environ.get("DISPLAY"))
+# "My Browser": drive the user's own Chrome (started with --remote-debugging-port) instead of launching one,
+# so the agent works with the user's logins. Set by the device connector on the user's machine.
+CDP_URL = os.environ.get("BROWSER_CDP_URL", "")
 SCREEN = {"width": 1280, "height": 900}
 
 
@@ -344,6 +348,12 @@ class Browser:
 
     async def launch(self):
         pw = await self._playwright()
+        if CDP_URL and (not self.browser or not self.browser.is_connected()):
+            try:
+                self.browser = await pw.chromium.connect_over_cdp(CDP_URL)
+            except Exception as e:
+                raise HTTPException(502, f"cannot reach your Chrome at {CDP_URL}: start it with --remote-debugging-port ({e})")
+            return self.browser
         if not self.browser or not self.browser.is_connected():
             args = ["--no-sandbox", "--disable-dev-shm-usage"]
             if HEADED:
@@ -363,6 +373,11 @@ class Browser:
             return self.page
         async with self.launch_lock:
             await self.launch()
+        if CDP_URL:  # a new tab in the user's own browser profile (their cookies and logins)
+            ctx = self.browser.contexts[0] if self.browser.contexts else await self.browser.new_context()
+            self.page = await ctx.new_page()
+            self.page.on("console", lambda m: self.console.append(f"[{m.type}] {m.text}"[:500]))
+            return self.page
         # headed: the page fills the window, so what the user sees over VNC is what the agent sees
         ctx = await (self.browser.new_context(no_viewport=True, locale="en-US") if HEADED
                      else self.browser.new_context(viewport={"width": 1280, "height": 800}, locale="en-US"))
@@ -372,7 +387,10 @@ class Browser:
 
     async def restart(self):
         try:
-            if self.browser:
+            if CDP_URL:  # never close the user's own browser, only the agent's tab
+                if self.page and not self.page.is_closed():
+                    await self.page.close()
+            elif self.browser:
                 await self.browser.close()
         except Exception:
             pass
@@ -731,7 +749,8 @@ async def vnc(ws: WebSocket):
 @app.get("/health")
 async def health():
     return {"ok": True, "workspace": str(WORKSPACE), "time": time.time(), "vnc": await vnc_available(),
-            "screen": SCREEN if HEADED else None}
+            "screen": SCREEN if HEADED else None, "browser": "cdp" if CDP_URL else "chromium",
+            "platform": sys.platform, "host": os.uname().nodename if hasattr(os, "uname") else ""}
 
 
 if __name__ == "__main__":

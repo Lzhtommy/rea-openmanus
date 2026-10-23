@@ -104,6 +104,8 @@
         <div class="lib-inner wide">
           <div class="lib-head"><h2>电脑</h2><button class="btn primary" id="pc-new">创建云电脑</button></div>
           <div id="pc-mine"></div>
+          <div class="lib-head" style="margin:20px 0 8px"><div class="nav-section" style="padding:0">连接您的设备 · 让 OpenManus 在你自己的电脑上工作</div><button class="btn ghost sm" id="dev-new">连接新计算机</button></div>
+          <div id="dev-list"></div>
           <div class="nav-section" style="padding-left:0">创建云电脑 · 为你找到合适的配置</div>
           <div id="pc-templates" class="sk-grid"></div>
         </div>
@@ -297,6 +299,14 @@
       </div>
       <div class="cc-actions"><button type="button" class="btn ghost" id="pcnew-cancel">取消</button><button type="submit" class="btn primary">创建</button></div>
     </form>
+  </div>
+
+  <div id="devnew-modal" class="hidden">
+    <div class="sched-card devnew-card">
+      <div class="viewer-head"><div class="viewer-title"><div style="font-size:16px;font-weight:500">连接新计算机</div></div><button type="button" class="icon-btn" id="devnew-close" data-icon="x"></button></div>
+      <div class="sched-body" id="devnew-body"></div>
+      <div class="cc-actions"><span id="devnew-status" class="muted"></span><span class="spacer"></span><button class="btn primary" id="devnew-done">完成</button></div>
+    </div>
   </div>
 
   <div id="pcview-modal" class="hidden">

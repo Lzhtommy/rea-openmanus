@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import computers, config, connectors, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import computers, config, connectors, devices, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
     skills.store = skills.Skills()
     sites.store = sites.Sites()
     computers.store = computers.Computers()
+    devices.store = devices.Devices()
     asyncio.create_task(computers.store.resume())
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
@@ -89,9 +90,12 @@ async def list_sessions():
 @app.post("/api/sessions")
 async def create_session(body: dict | None = None):
     s = session_mod.store.create()
-    cid = (body or {}).get("computerId")
+    cid, did = (body or {}).get("computerId"), (body or {}).get("deviceId")
     if cid and computers.store and cid in computers.store.items:
         s.computer_id = cid
+        s.persist()
+    elif did and devices.store and did in devices.store.items:
+        s.device_id = did
         s.persist()
     pid = (body or {}).get("projectId")
     if pid and projects.store and pid in projects.store.items:
@@ -780,6 +784,88 @@ async def _proxy_port(sb, port: int, request: Request) -> Response:
     r = await sb.http.request(request.method, url, headers=headers, content=await request.body())
     drop = {"content-encoding", "transfer-encoding", "connection", "content-length"}
     return Response(r.content, status_code=r.status_code, headers={k: v for k, v in r.headers.items() if k.lower() not in drop})
+
+
+# ------------------------------------------------------------- devices (连接您的设备) ---
+
+def _device(did: str) -> dict:
+    d = devices.store.items.get(did)
+    if not d:
+        raise HTTPException(404, "device not found")
+    return d
+
+
+@app.get("/api/devices")
+async def list_devices():
+    return {"devices": devices.store.list(),
+            "tasks": {did: [s.session_id for s in session_mod.store.sessions.values() if s.device_id == did] for did in devices.store.items}}
+
+
+@app.post("/api/devices")
+async def create_device(body: dict | None = None):
+    """Pair a new computer: the token is returned once, with the command to run on that machine."""
+    d, token = devices.store.create(str((body or {}).get("name") or ""))
+    return {"device": d, "token": token, "server": config.PUBLIC_BASE_URL}
+
+
+@app.patch("/api/devices/{did}")
+async def update_device(did: str, body: dict):
+    _device(did)
+    if "name" in body:
+        devices.store.items[did]["renamed"] = True
+    return devices.store.update(did, body)
+
+
+@app.delete("/api/devices/{did}")
+async def delete_device(did: str):
+    _device(did)
+    for s in session_mod.store.sessions.values():
+        if s.device_id == did:
+            await s.stop()
+    if live := devices.store.live.get(did):
+        with contextlib.suppress(Exception):
+            await live.ws.close(code=4001)
+    await manager.destroy(devices.sandbox_id(did))
+    devices.store.delete(did)
+    return {"ok": True}
+
+
+@app.get("/api/devices/{name}.py")
+async def device_scripts(name: str):
+    """The connector and the action server it runs, for machines without a checkout of this repo."""
+    files = {"agent": config.ROOT / "device" / "openmanus_device.py", "server": config.SANDBOX_DIR / "server.py"}
+    if name not in files:
+        raise HTTPException(404)
+    return FileResponse(files[name], media_type="text/x-python", headers={"Content-Disposition": f'attachment; filename="{files[name].name}"'})
+
+
+@app.websocket("/api/devices/connect")
+async def device_connect(websocket: WebSocket, token: str = ""):
+    """The connector's tunnel: it says hello, then answers the HTTP requests we send it."""
+    d = devices.store.by_token(token)
+    await websocket.accept()
+    if not d:
+        await websocket.send_json({"type": "error", "message": "unknown device token: create the device again on the 电脑 page"})
+        await websocket.close(code=4003)
+        return
+    try:
+        hello = await asyncio.wait_for(websocket.receive_json(), 15)
+    except (asyncio.TimeoutError, WebSocketDisconnect, ValueError):
+        await websocket.close(code=4000)
+        return
+    live = devices.store.attach(d["id"], websocket, hello)
+    stale = manager.sandboxes.get(devices.sandbox_id(d["id"]))  # workdir may have changed: re-attach lazily
+    if stale and stale.workdir != hello.get("workdir"):
+        await manager.stop(devices.sandbox_id(d["id"]))
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            if msg.get("type") == "response":
+                live.resolve(msg)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        devices.store.detach(d["id"], live)
 
 
 # ------------------------------------------------------------- creations (创作: published sites) ---

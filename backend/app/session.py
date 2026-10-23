@@ -43,6 +43,7 @@ class Session(AgentHost):
         self.schedule_id: str | None = None  # set when a scheduled task started this session
         self.trigger_id: str | None = None  # set when a trigger (webhook / condition) started this session
         self.computer_id: str | None = None  # runs on this cloud computer instead of its own sandbox
+        self.device_id: str | None = None  # runs on the user's own computer (device connector)
         self.project_id: str | None = None  # project this task belongs to (instructions + files)
         self.project_announced = False
         self.share: dict | None = None  # {token, createdAt}: public read-only replay link
@@ -62,13 +63,21 @@ class Session(AgentHost):
     @property
     def sandbox_id(self) -> str:
         """The sandbox this task acts in: its own, or the cloud computer it was started on."""
+        if self.device_id:
+            return f"dev-{self.device_id}"
         return f"pc-{self.computer_id}" if self.computer_id else self.session_id
+
+    @property
+    def local_device(self) -> dict | None:
+        """The user's own computer this task runs on (every command there needs their approval)."""
+        from . import devices
+        return devices.store.items.get(self.device_id) if self.device_id and devices.store else None
 
     # ------------------------------------------------------- persistence ---
 
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
-                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id, "triggerId": self.trigger_id, "computerId": self.computer_id,
+                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id, "triggerId": self.trigger_id, "computerId": self.computer_id, "deviceId": self.device_id,
                 "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id}
 
     def persist(self) -> None:
@@ -89,6 +98,7 @@ class Session(AgentHost):
         s.schedule_id = meta.get("scheduleId")
         s.trigger_id = meta.get("triggerId")
         s.computer_id = meta.get("computerId")
+        s.device_id = meta.get("deviceId")
         s.model_selection = meta.get("model") or {}
         s.share = meta.get("share")
         s.project_id = meta.get("projectId")
@@ -233,6 +243,10 @@ class Session(AgentHost):
         from . import computers
         return computers.store.items.get(self.computer_id) if computers.store else None
 
+    def _skills_dir(self) -> str:
+        sb = manager.sandboxes.get(self.sandbox_id)
+        return sb.skills_dir if sb else ("~/.openmanus/skills" if self.device_id else "skills")
+
     def skill_used(self, name: str) -> None:
         if skills.store:
             skills.store.used(name)
@@ -280,7 +294,7 @@ class Session(AgentHost):
         if picked:  # Manus' extData.capabilities.enabledSkills: the user pinned skills to this request
             self.picked_skills |= set(picked)
             full += ("\n\n<selected_skills>\nThe user chose these skills for this request. Read each SKILL.md with "
-                     "file_read before starting and follow it:\n" + "\n".join(f"- skills/{n}/SKILL.md" for n in picked)
+                     "file_read before starting and follow it:\n" + "\n".join(f"- {self._skills_dir()}/{n}/SKILL.md" for n in picked)
                      + "\n</selected_skills>")
         if self.pending_confirms:
             # Typing instead of approving means "no": decline the held actions and pass the message on.
@@ -329,6 +343,14 @@ class Session(AgentHost):
                         f"This is the user's persistent cloud computer \"{pc['name']}\" ({pc['cpus']} CPU, {pc['memory']} GB): files, "
                         "installed software and running services stay after this task and are shared with other tasks on it. "
                         "Look around before assuming a clean machine; leave long-running services running if they are the point.\n</environment>")
+                if dev := self.local_device:
+                    system_notes[-1] = system_notes[-1].replace("</environment>",
+                        f"This task runs on the USER'S OWN COMPUTER \"{dev['name']}\" ({dev.get('os') or 'unknown OS'}), not a sandbox. "
+                        "The user approves each command and file change. Work inside the working directory, never delete "
+                        "or overwrite their files without being asked, avoid installing system-wide software, and prefer "
+                        "read-only commands to look around." + (" The browser is the user's own Chrome with their logins: "
+                        "do not change account settings, buy, post or send anything without asking." if dev.get("myBrowser") else "")
+                        + "\n</environment>")
                 self.env_announced = True
             if self.project_id and projects.store and self.project_id in projects.store.items and not self.project_announced:
                 paths = await projects.store.install(self.project_id, sandbox)
