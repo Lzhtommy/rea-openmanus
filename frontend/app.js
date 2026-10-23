@@ -53,6 +53,7 @@ const ICONS = {
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   play2: '<path d="M6 4l14 8-14 8z"/>',
   flex: '<circle cx="9" cy="14" r="5.5"/><circle cx="15" cy="10" r="5.5"/>',
+  plug: '<path d="M12 22v-5M9 8V2M15 8V2M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z"/>',
   library: '<path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"/>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   paperclip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 0 1 5.7 5.7l-8.6 8.6a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
@@ -92,10 +93,11 @@ const TOOL = {
   map_reduce: { icon: "layers", use: "并行子任务" },
   deploy: { icon: "rocket", use: "部署服务" },
   schedule: { icon: "clock", use: "自动化" },
+  mcp: { icon: "plug", use: "连接器" },
 };
 const ACTION_ZH = {
   "Executing command": "执行命令", "Checking terminal": "查看终端", Browsing: "浏览", Typing: "输入", Clicking: "点击",
-  "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务",
+  "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务", "Searching tools": "搜索工具", "Using MCP": "调用工具",
   Searching: "搜索", "Reading webpage": "提取网页", "Running parallel sub-agents": "并行执行子任务", "Exposing port": "部署预览",
 };
 const zh = (a) => ACTION_ZH[a] || a || "";
@@ -103,6 +105,7 @@ const zh = (a) => ACTION_ZH[a] || a || "";
 // ------------------------------------------------------------------ state ---
 const S = {
   models: { modes: [], providers: [], gatewayModels: [] }, modelSel: null, modeMenu: false,
+  conns: [], editingConn: null,
   view: "home", library: [], libFilter: "all", libQuery: "", schedules: [], editing: null,
   sessions: [], cfg: {}, current: null, ws: null, lastSeq: {}, replaying: false, filter: "",
   title: "", status: "idle", live: "", plan: [], planOpen: false,
@@ -228,24 +231,27 @@ function scheduleRender(scrollEnd = false) {
 }
 
 function renderAll() {
-  const auto = S.view === "automations";
-  const lib = S.view === "library" || auto; // full-page views without a composer dock
+  const auto = S.view === "automations", conn = S.view === "connectors";
+  const lib = S.view === "library" || auto || conn; // full-page views without a composer dock
   const home = !S.current && !lib;
   $("#home").classList.toggle("hidden", !home);
   $("#library").classList.toggle("hidden", S.view !== "library");
   $("#automations").classList.toggle("hidden", !auto);
+  $("#connectors").classList.toggle("hidden", !conn);
+  $("#nav-conn").classList.toggle("active", conn);
   $("#nav-auto").classList.toggle("active", auto);
   $("#scroller").classList.toggle("hidden", home || lib);
   $("#dock").classList.toggle("hidden", home || lib);
   $("#nav-library").classList.toggle("active", S.view === "library");
   (home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  const title = auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  const title = conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   renderModeButton();
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
   ["#share-btn", "#delete-btn"].forEach((s) => $(s).classList.toggle("hidden", home || lib));
   $("#panel-btn").classList.toggle("hidden", home || lib || !S.steps.length || S.panel.open);
   if (auto) { renderAutomations(); renderPanel(); return; }
+  if (conn) { renderConnectors(); renderPanel(); return; }
   if (lib) { renderLibrary(); renderPanel(); return; }
   if (home) { renderPanel(); return; }
 
@@ -367,6 +373,8 @@ function summarize(steps) {
     else if (n === "agent_map_reduce") c.mr++;
     else if (n.startsWith("deploy_")) c.dep++;
     else if (n.startsWith("schedule_")) c.sched = (c.sched || 0) + 1;
+    else if (n === "mcp_search_tools") c.ts = (c.ts || 0) + 1;
+    else if (n === "mcp_call_tool") c.tc = (c.tc || 0) + 1;
   }
   const parts = [];
   if (c.q) parts.push(`已搜索 ${c.q} 个查询`);
@@ -380,6 +388,8 @@ function summarize(steps) {
   if (c.mr) parts.push(`并行执行了 ${c.mr} 批子任务`);
   if (c.dep) parts.push(`部署了 ${c.dep} 个服务`);
   if (c.sched) parts.push(`创建了 ${c.sched} 个定时任务`);
+  if (c.ts) parts.push(`搜索了 ${c.ts} 次工具`);
+  if (c.tc) parts.push(`调用了 ${c.tc} 次连接器工具`);
   return parts.join(" · ") || `执行了 ${steps.length} 个步骤`;
 }
 
@@ -559,6 +569,8 @@ function stepView(s) {
   if (d.textEditor) return editorHtml(d.textEditor);
   if (d.mapReduce) return `<div class="mr">${d.mapReduce.taskDetails.map((t) => `<div class="mr-row"><span class="s ${t.status}">${{ pending: "○", running: "◌", completed: "✓", failed: "✕" }[t.status] || ""}</span><div class="b"><div>${t.index + 1}. ${esc(t.item)}</div>` +
     (t.status === "running" && t.progress ? `<div class="p">${esc(t.progress)}</div>` : "") + (t.result ? `<details><summary>结果</summary><div class="prose">${md(t.result)}</div></details>` : "") + `</div></div>`).join("")}</div>`;
+  if (d.mcp) return `<div class="file-head">${icon("plug")}<span class="grow">${esc(d.mcp.server)} · ${esc(d.mcp.action)}</span></div>` +
+    `<div class="page-md"><div class="mcp-label">参数</div><pre class="cc-cmd">${esc(d.mcp.argumentsPreview)}</pre><div class="mcp-label">结果</div><pre class="cc-cmd mcp-out">${esc(d.mcp.resultPreview)}</pre></div>`;
   if (d.schedule) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${autoCardHtml(d.schedule, false)}</div></div>`;
   if (d.deploy) return `<div class="urlbar">${icon("globe")}<a href="${esc(d.deploy.url)}" target="_blank">${esc(d.deploy.url)}</a></div><iframe class="preview-frame" style="height:calc(100% - 37px)" src="${esc(d.deploy.url)}"></iframe>`;
   if (d.error) return `<div class="err-view"><div class="term">${esc(d.error)}</div></div>`;
@@ -629,6 +641,75 @@ function toggleTakeover() {
   if (!ending) { S.panel.open = true; S.panel.userClosed = false; S.panel.sel = null; S.panel.file = null; }
   else if (S.status === "waiting") send({ type: "user_message", sessionId: S.current, content: "我已完成浏览器中的操作，请继续。", attachments: [] });
   refreshSel();
+}
+
+// ------------------------------------------------------------------ connectors (MCP) ---
+async function openConnectors() {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "connectors";
+  history.replaceState(null, "", "#connectors");
+  renderSessions();
+  await loadConns();
+}
+async function loadConns() { try { S.conns = await (await fetch("/api/connectors")).json(); } catch { S.conns = []; } scheduleRender(); }
+const CONN_STATUS = { connected: ["ok", "已连接"], connecting: ["", "连接中"], error: ["err", "连接失败"], disconnected: ["", "未连接"], disabled: ["", "已停用"] };
+function renderConnectors() {
+  $("#conn-list").innerHTML = S.conns.length ? S.conns.map((c) => {
+    const [cls, label] = CONN_STATUS[c.status] || ["", c.status];
+    const where = c.transport === "stdio" ? `${c.command} ${(c.args || []).join(" ")}` : c.url;
+    const tools = c.tools.map((t) => `<span class="tool-chip" title="${esc(t.description)}">${t.readOnly ? "" : icon("pencil")}${esc(t.name)}</span>`).join("");
+    return `<div class="auto-card ${c.enabled ? "" : "off"}"><div class="auto-top"><span class="auto-ico">${icon("plug")}</span><div class="auto-main">` +
+      `<div class="auto-title">${esc(c.name)} <span class="conn-st ${cls}"><i></i>${label}${c.status === "connected" ? ` · ${c.tools.length} 个工具` : ""}</span></div>` +
+      `<div class="auto-when mono">${esc(c.transport)} · ${esc(where)}</div></div>` +
+      `<button class="switch ${c.enabled ? "on" : ""}" data-conn="toggle" data-id="${esc(c.id)}" title="${c.enabled ? "停用" : "启用"}"><i></i></button></div>` +
+      (c.error ? `<div class="err-detail">${esc(c.error)}</div>` : "") + (tools ? `<div class="tool-chips">${tools}</div>` : "") +
+      `<div class="auto-foot"><div class="auto-runs">${c.autoApprove ? "<span>已信任：调用不再确认</span>" : "<span>非只读工具调用前需确认（带 ✎ 标记）</span>"}</div>` +
+      `<button class="btn ghost sm" data-conn="restart" data-id="${esc(c.id)}">重新连接</button>` +
+      `<button class="icon-btn sm" data-conn="edit" data-id="${esc(c.id)}" title="编辑">${icon("pencil")}</button>` +
+      `<button class="icon-btn sm" data-conn="del" data-id="${esc(c.id)}" title="删除">${icon("trash")}</button></div></div>`;
+  }).join("") : `<div class="lib-empty">${icon("plug")}<div>还没有连接器</div><div class="muted">添加 MCP 服务器后，OpenManus 就能使用其中的工具</div></div>`;
+}
+const linesToMap = (text, sep) => Object.fromEntries(text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const i = l.indexOf(sep); return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 1).trim()] : [l, ""]; }));
+function openConnForm(c) {
+  S.editingConn = c || null;
+  const f = $("#conn-form"); f.reset();
+  $("#conn-form-title").textContent = c ? "编辑连接器" : "添加连接器";
+  $("#conn-err").textContent = "";
+  if (c) {
+    f.name.value = c.name; f.description.value = c.description || ""; f.transport.value = c.transport;
+    f.command.value = c.command || ""; f.args.value = (c.args || []).join("\n"); f.url.value = c.url || "";
+    f.env.value = Object.keys(c.env || {}).map((k) => `${k}=••••`).join("\n");
+    f.headers.value = Object.keys(c.headers || {}).map((k) => `${k}: ••••`).join("\n");
+    f.autoApprove.checked = !!c.autoApprove;
+  }
+  syncConnFields();
+  $("#conn-modal").classList.remove("hidden");
+}
+function syncConnFields() { const t = $("#conn-form").transport.value; $("#conn-form").querySelectorAll("[data-for]").forEach((n) => n.classList.toggle("hidden", !n.dataset.for.split(" ").includes(t))); }
+async function saveConn(e) {
+  e.preventDefault();
+  const f = e.target, btn = $("#conn-save");
+  const body = { name: f.name.value, description: f.description.value, transport: f.transport.value, autoApprove: f.autoApprove.checked,
+    command: f.command.value, args: f.args.value.split("\n").map((x) => x.trim()).filter(Boolean),
+    env: linesToMap(f.env.value, "="), url: f.url.value, headers: linesToMap(f.headers.value, ":") };
+  btn.disabled = true; btn.textContent = "连接中…"; $("#conn-err").textContent = "";
+  const r = await fetch(S.editingConn ? `/api/connectors/${S.editingConn.id}` : "/api/connectors",
+    { method: S.editingConn ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  btn.disabled = false; btn.textContent = "连接";
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("#conn-err").textContent = j.detail || "保存失败"; return; }
+  if (j.status === "error") { $("#conn-err").textContent = `已保存，但连接失败：${j.error}`; S.editingConn = j; loadConns(); return; }
+  $("#conn-modal").classList.add("hidden");
+  loadConns();
+}
+async function connAction(a, id) {
+  const c = S.conns.find((x) => x.id === id);
+  if (!c) return;
+  if (a === "edit") return openConnForm(c);
+  if (a === "del") { if (!confirm(`删除连接器「${c.name}」？`)) return; await fetch(`/api/connectors/${id}`, { method: "DELETE" }); }
+  if (a === "toggle") await fetch(`/api/connectors/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !c.enabled }) });
+  if (a === "restart") { c.status = "connecting"; renderConnectors(); await fetch(`/api/connectors/${id}/restart`, { method: "POST" }); }
+  loadConns();
 }
 
 // ------------------------------------------------------------------ modes & Flex (Manus' mode selector) ---
@@ -940,6 +1021,12 @@ function bind() {
   const newTask = () => goHome();
   $("#new-task").onclick = newTask; $("#new-task-2").onclick = newTask;
   $("#nav-library").onclick = openLibrary;
+  $("#nav-conn").onclick = openConnectors;
+  $("#conn-new").onclick = () => openConnForm(null);
+  $("#conn-list").onclick = (e) => { const b = e.target.closest("[data-conn]"); if (b) connAction(b.dataset.conn, b.dataset.id); };
+  $("#conn-form").onsubmit = saveConn;
+  $("#conn-form").transport.onchange = syncConnFields;
+  $("#conn-close").onclick = $("#conn-cancel").onclick = () => $("#conn-modal").classList.add("hidden");
   $("#mode-btn").onclick = (e) => { e.stopPropagation(); S.modeMenu = !S.modeMenu; renderModeButton(); };
   $("#mode-menu").onclick = (e) => {
     e.stopPropagation();
@@ -1079,6 +1166,7 @@ async function deleteSession(sid) {
   const sid = location.hash.slice(1);
   if (sid === "library") openLibrary();
   else if (sid === "automations") openAutomations();
+  else if (sid === "connectors") openConnectors();
   else openSession(sid && S.sessions.some((s) => s.id === sid) ? sid : null);
   autoGrow();
 })();

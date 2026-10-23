@@ -17,7 +17,7 @@ import logging
 import time
 from pathlib import Path
 
-from . import config, llm, providers, skills
+from . import config, connectors, llm, providers, skills
 from .agent import Agent, AgentHost, now_ms, render_plan, short_id
 from .sandbox import manager
 
@@ -39,6 +39,7 @@ class Session(AgentHost):
         self.approved: set[str] = set()
         self.files: dict[str, dict] = {}  # sandbox path -> stored copy (survives the sandbox)
         self.schedule_id: str | None = None  # set when a scheduled task started this session
+        self.connectors_note = ""  # last connector summary told to the agent (re-sent when it changes)
         self.model_selection: dict = {}  # {mode, provider?, model?} chosen in the UI (Manus' mode selector)
         self.task: asyncio.Task | None = None
         self.subscribers: set[asyncio.Queue] = set()
@@ -253,6 +254,9 @@ class Session(AgentHost):
                 if catalog := skills.catalog(sandbox):
                     system_notes.append(catalog)
                 self.env_announced = True
+            if connectors.manager and (summary := connectors.manager.summary()) != self.connectors_note:
+                system_notes.append(summary or "<connectors>\nNo MCP servers are connected now.\n</connectors>")
+                self.connectors_note = summary
             if profile.planner:
                 await self.emit({"type": "liveStatus", "text": "Planning"})
                 context = "" if first_turn else "Current plan:\n" + render_plan(self.plan)

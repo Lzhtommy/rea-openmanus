@@ -331,14 +331,17 @@ async def _structured(name: str, system: str, schema: dict, content: str, profil
             fmt = ({"type": "json_object"} if ident in _no_json_schema
                    else {"type": "json_schema", "json_schema": {"name": name, "schema": schema, "strict": True}})
             resp = await client(p).chat.completions.create(
-                messages=messages, response_format=fmt, max_tokens=4000, **_common(p, "low"))
+                messages=messages, response_format=fmt, max_tokens=4000, **_common(p, None))  # no reasoning: forced-tool JSON conflicts with thinking
         except openai.BadRequestError as e:
-            if ident in _no_json_schema or "response_format" not in str(e):
+            if ident in _no_json_schema:
                 raise
+            # json_schema unsupported, or emulated by the gateway with a forced tool call that some models
+            # reject (e.g. "tool_choice is incompatible with thinking"): fall back to plain JSON mode
+            log.info("%s/%s rejected json_schema (%s)", *ident, str(e)[:120])
             _no_json_schema.add(ident)
             log.info("%s/%s rejects json_schema output; using json_object", *ident)
             resp = await client(p).chat.completions.create(
-                messages=messages, response_format={"type": "json_object"}, max_tokens=4000, **_common(p, "low"))
+                messages=messages, response_format={"type": "json_object"}, max_tokens=4000, **_common(p, None))  # no reasoning: forced-tool JSON conflicts with thinking
     except openai.OpenAIError as e:
         log.warning("%s failed: %s", name, e)
         return None

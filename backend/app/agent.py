@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from . import config, llm, providers
+from . import config, connectors, llm, providers
 from .prompts import SUBAGENT_BRIEF
 from .sandbox import Sandbox, SandboxError
 from .search import search_web
@@ -117,6 +117,11 @@ class Agent:
             self.messages.append({"role": "assistant",
                                   "content": [b.model_dump(mode="json", exclude_none=True) for b in resp.content]})
             await self._emit_thoughts(resp)
+            narration = "".join(b.text for b in resp.content if b.type == "text").strip()
+            if tool_uses and narration and self.role == "main":
+                # text written alongside tool calls was already streamed to the user: keep it as narration
+                await self.host.emit({"type": "chat", "sender": "assistant", "messageType": "text", "content": narration,
+                                      "attachments": [], "deliveryKind": "progress", "streamId": text_id})
 
             if not tool_uses:
                 # Plain-text answer: surface it and stop (it is the final reply).
@@ -186,8 +191,7 @@ class Agent:
         for b in resp.content:
             if b.type == "thinking" and getattr(b, "thinking", ""):
                 await self.host.emit({"type": "explanation", "content": b.thinking})
-            elif b.type == "text" and b.text.strip() and any(x.type == "tool_use" for x in resp.content):
-                await self.host.emit({"type": "explanation", "content": b.text})
+            # text next to tool calls is shown as narration (see run), not as an explanation
 
     async def _error(self, msg: str) -> None:
         log.error("[%s] %s", self.host.session_id, msg)
@@ -238,14 +242,17 @@ class Agent:
 
     async def _approved(self, name: str, args: dict, base: dict, silent: bool) -> bool:
         """Hold actions with outside effects until the user approves them in the UI."""
-        reason = needs_confirm(name, args) if config.CONFIRM_ENABLED else None
-        if not reason:
+        reason = needs_confirm(name, args)
+        if name == "mcp_call_tool" and connectors.manager:
+            reason = connectors.manager.needs_confirm(str(args.get("tool", "")))
+        if not config.CONFIRM_ENABLED or not reason:
             return True
-        key = f"{name}:{args.get('port') or args.get('command') or args.get('input')}"
+        key = f"{name}:{args.get('port') or args.get('command') or args.get('input') or args.get('tool')}"
         if key in self.host.approved:  # same action already approved in this session
             return True
         await self.host.emit({**base, "id": base["actionId"], "status": "need_confirm",
-                              "confirm": {"reason": reason, "command": args.get("command") or args.get("input") or "",
+                              "confirm": {"reason": reason, "command": args.get("command") or args.get("input") or
+                                          (json.dumps(args.get("arguments") or {}, ensure_ascii=False, indent=1) if name == "mcp_call_tool" else ""),
                                           "port": args.get("port")}})
         approved = await self.host.confirm(base["actionId"])
         if approved:
@@ -385,6 +392,22 @@ class Agent:
                                f"from inside the sandbox: to check the page yourself, open http://localhost:{a['port']}/ "
                                f"in the browser. Use relative asset paths so it works under the preview path.",
                                {"deploy": {"port": a["port"], "url": url}})
+
+        # ---- MCP connectors
+        if name == "mcp_search_tools":
+            hits = connectors.manager.search(a["query"]) if connectors.manager else []
+            text = json.dumps(hits, ensure_ascii=False, indent=1) if hits else (
+                "No matching tools." + ("" if connectors.manager and connectors.manager.catalog() else
+                                       " No MCP server is connected; the user can add one under 连接器."))
+            return ToolOutcome(text, {"mcp": {"server": "openmanus-tools", "primitive": "tool", "action": "search",
+                                              "argumentsPreview": json.dumps({"query": a["query"]}, ensure_ascii=False),
+                                              "resultPreview": "\n".join(f"{h['tool']} — {h['description'][:80]}" for h in hits) or text}})
+        if name == "mcp_call_tool":
+            tool, cargs = str(a["tool"]), a.get("arguments") if isinstance(a.get("arguments"), dict) else {}
+            text, err = await connectors.manager.call(tool, cargs) if connectors.manager else ("No MCP servers.", True)
+            return ToolOutcome(text, {"mcp": {"server": tool.partition(".")[0], "primitive": "tool", "action": tool.partition(".")[2],
+                                              "argumentsPreview": json.dumps(cargs, ensure_ascii=False, indent=1),
+                                              "resultPreview": text[:4000]}}, is_error=err)
 
         # ---- automation
         if name == "schedule_create":

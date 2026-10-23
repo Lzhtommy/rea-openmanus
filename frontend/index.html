@@ -22,6 +22,7 @@
       <div class="nav-body">
         <button class="nav-item" id="new-task"><span class="nav-ico" data-icon="newTask"></span><span class="nav-label">新建任务</span><kbd>⌘K</kbd></button>
         <button class="nav-item" id="nav-auto"><span class="nav-ico" data-icon="clock"></span><span class="nav-label">自动化</span></button>
+        <button class="nav-item" id="nav-conn"><span class="nav-ico" data-icon="plug"></span><span class="nav-label">连接器</span></button>
         <button class="nav-item" id="nav-library"><span class="nav-ico" data-icon="library"></span><span class="nav-label">资料库</span></button>
         <div class="nav-search hidden" id="nav-search"><span data-icon="search"></span><input id="search-input" placeholder="搜索任务" /></div>
         <div class="nav-section">任务</div>
@@ -75,6 +76,14 @@
           <div class="lib-head"><h2>自动化</h2><button class="btn primary" id="auto-new">新建定时任务</button></div>
           <p class="auto-intro">让 OpenManus 按计划自动执行任务，每次运行都会创建一个新任务。也可以直接在对话里说「每天早上 8 点帮我……」。</p>
           <div id="auto-list"></div>
+        </div>
+      </div>
+
+      <div id="connectors" class="hidden">
+        <div class="lib-inner">
+          <div class="lib-head"><h2>连接器</h2><button class="btn primary" id="conn-new">添加连接器</button></div>
+          <p class="auto-intro">通过 MCP 把外部工具和数据接入 OpenManus。Agent 会按需搜索并调用这些工具；未标记为只读的工具在调用前会请你确认。</p>
+          <div id="conn-list"></div>
         </div>
       </div>
 
@@ -150,6 +159,25 @@
       <label>模型<input name="model" list="flex-models" placeholder="连接后从列表中选择，或直接填写" /><datalist id="flex-models"></datalist></label>
       <div class="sched-err" id="flex-err"></div>
       <div class="flex-actions"><button type="button" class="btn ghost" id="flex-remove">移除</button><span class="spacer"></span><button type="button" class="btn ghost" id="flex-cancel">取消</button><button type="submit" class="btn primary" id="flex-connect">连接</button></div>
+    </form>
+  </div>
+
+  <div id="conn-modal" class="hidden">
+    <form class="sched-card" id="conn-form" autocomplete="off">
+      <div class="viewer-head"><div class="viewer-title"><div id="conn-form-title" style="font-size:16px;font-weight:500">添加连接器</div></div><button type="button" class="icon-btn" id="conn-close" data-icon="x"></button></div>
+      <div class="sched-body">
+        <label>名称<input name="name" placeholder="例如：GitHub" required /></label>
+        <label>说明（告诉 Agent 这个连接器能做什么）<input name="description" placeholder="可选" /></label>
+        <label>类型<select name="transport"><option value="stdio">本地命令（stdio）</option><option value="http">远程 HTTP（Streamable HTTP）</option><option value="sse">远程 SSE</option></select></label>
+        <label data-for="stdio">启动命令<input name="command" placeholder="npx" /></label>
+        <label data-for="stdio">参数（每行一个）<textarea name="args" rows="2" placeholder="-y&#10;@modelcontextprotocol/server-github"></textarea></label>
+        <label data-for="stdio">环境变量（每行 KEY=VALUE）<textarea name="env" rows="2" placeholder="GITHUB_TOKEN=..."></textarea></label>
+        <label data-for="http sse">地址<input name="url" placeholder="https://example.com/mcp" /></label>
+        <label data-for="http sse">请求头（每行 Key: Value）<textarea name="headers" rows="2" placeholder="Authorization: Bearer ..."></textarea></label>
+        <label class="check"><input type="checkbox" name="autoApprove" />信任此连接器：调用工具时不再逐次确认</label>
+        <div class="sched-err" id="conn-err"></div>
+      </div>
+      <div class="cc-actions"><button type="button" class="btn ghost" id="conn-cancel">取消</button><button type="submit" class="btn primary" id="conn-save">连接</button></div>
     </form>
   </div>
 

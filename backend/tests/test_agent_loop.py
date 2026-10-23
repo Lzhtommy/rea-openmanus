@@ -385,6 +385,49 @@ async def test_model_selection(store, monkeypatch):
     providers.store.delete("deepseek")
 
 
+@pytest.mark.asyncio
+async def test_mcp_connector(store, monkeypatch, tmp_path):
+    """Agent discovers MCP tools by search, calls a read-only one directly and a writing one after approval."""
+    import sys
+    from app import connectors
+    notes = tmp_path / "notes.txt"
+    connectors.manager = connectors.Connectors()
+    monkeypatch.setattr(connectors.manager, "path", tmp_path / "connectors.json")
+    info = await connectors.manager.upsert({"name": "Demo Notes", "transport": "stdio", "command": sys.executable,
+                                            "args": [os.path.join(os.path.dirname(__file__), "mcp_demo_server.py")],
+                                            "env": {"DEMO_NOTES": str(notes)}})
+    assert info["status"] == "connected", info
+    assert {t["name"] for t in info["tools"]} == {"add_numbers", "save_note"}
+    assert info["env"] == {"DEMO_NOTES": "••••"}  # secrets never leave the server
+    model = ScriptedModel([
+        msg(tool("mcp_search_tools", query="add numbers")),
+        msg(tool("mcp_call_tool", tool="demo_notes.add_numbers", arguments={"a": 2, "b": 3})),
+        msg(tool("mcp_call_tool", tool="demo_notes.save_note", arguments={"text": "hello mcp"})),
+        msg(tool("idle")),
+    ])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("use the notes tools", [])
+    for _ in range(200):
+        if s.pending_confirms:
+            break
+        await asyncio.sleep(0.1)
+    held = next(e for e in s.events if e["type"] == "toolUsed" and e["status"] == "need_confirm")
+    assert "save_note" in held["confirm"]["reason"] and "hello mcp" in held["confirm"]["command"]
+    s.resolve_confirm(held["actionId"], True)
+    await wait_status(s, {"idle"})
+    results = [b["content"] for m in s.messages if m["role"] == "user" and isinstance(m["content"], list)
+               for b in m["content"] if b.get("type") == "tool_result"]
+    assert "demo_notes.add_numbers" in results[0] and '"input_schema"' in results[0]
+    assert results[1].strip() == "5.0"
+    assert "hello mcp" in notes.read_text()
+    assert any("<connectors>" in m["content"] for m in s.messages if m["role"] == "system")
+    ev = [e for e in s.events if e["type"] == "toolUsed" and e["status"] == "success" and e["tool"] == "mcp"]
+    assert ev and ev[0]["detail"]["mcp"]["action"] == "search"
+    await connectors.manager.stop_all()
+    connectors.manager = None
+
+
 def teardown_module():
     for proc in manager.local_procs.values():
         if proc.returncode is None:

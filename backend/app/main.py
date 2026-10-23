@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, llm, providers, scheduler as scheduler_mod, session as session_mod
+from . import config, connectors, llm, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -35,8 +35,11 @@ async def lifespan(app: FastAPI):
     session_mod.store = session_mod.SessionStore()
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
+    connectors.manager = connectors.Connectors()
+    asyncio.create_task(connectors.manager.start_all())
     yield
     await scheduler_mod.scheduler.stop()
+    await connectors.manager.stop_all()
     for s in session_mod.store.sessions.values():
         if s.task and not s.task.done():
             s.task.cancel()
@@ -200,6 +203,45 @@ async def provider_models(pid: str):
         return await llm.list_models(base, key)
     except Exception as e:
         raise HTTPException(400, f"无法获取模型列表：{e}")
+
+
+# ------------------------------------------------------------- connectors (MCP) ---
+
+@app.get("/api/connectors")
+async def list_connectors():
+    return connectors.manager.list()
+
+
+@app.post("/api/connectors")
+async def create_connector(body: dict):
+    try:
+        return await connectors.manager.upsert(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/api/connectors/{cid}")
+async def update_connector(cid: str, body: dict):
+    if cid not in connectors.manager.items:
+        raise HTTPException(404, "connector not found")
+    try:
+        return await connectors.manager.upsert({**connectors.manager.items[cid], **body}, cid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/connectors/{cid}")
+async def delete_connector(cid: str):
+    await connectors.manager.delete(cid)
+    return {"ok": True}
+
+
+@app.post("/api/connectors/{cid}/restart")
+async def restart_connector(cid: str):
+    if cid not in connectors.manager.items:
+        raise HTTPException(404, "connector not found")
+    await connectors.manager.restart(cid)
+    return connectors.manager.public(connectors.manager.items[cid])
 
 
 # ------------------------------------------------------------- schedules (自动化) ---

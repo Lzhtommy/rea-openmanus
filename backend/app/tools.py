@@ -125,6 +125,16 @@ _TOOLS = [
         "output_file_pattern": {"type": "string",
                                 "description": "Optional per-item output path, may contain {index}"}},
        ["instruction", "items"]),
+    # ---- MCP connectors (tools are discovered on demand, not listed here)
+    _t("mcp_search_tools",
+       "Search the tools of the user's connected MCP servers (see <connectors>). Returns matching tools with "
+       "their qualified name and full input schema. Search before calling; several queries are fine.",
+       {"query": {"type": "string", "description": "Keywords for the capability you need"}}, ["query"]),
+    _t("mcp_call_tool",
+       "Call a tool found with mcp_search_tools, by its qualified name (server.tool), with arguments matching "
+       "its input schema.",
+       {"tool": S, "arguments": {"type": "object", "description": "Arguments per the tool's input schema"}},
+       ["tool"]),
     # ---- automation
     _t("schedule_create",
        "Create a scheduled task that runs `prompt` as a new task automatically (e.g. a daily news digest). "
@@ -181,7 +191,7 @@ def needs_confirm(name: str, args: dict) -> str | None:
 
 # Read-only tools without shared state. When every call in a turn is one of these they
 # run concurrently (Manus fires several webpage_extract / search calls at once).
-PARALLEL_SAFE = {"info_search_web", "info_extract_webpage", "file_read", "file_find_in_content",
+PARALLEL_SAFE = {"info_search_web", "info_extract_webpage", "file_read", "file_find_in_content", "mcp_search_tools",
                  "file_find_by_name"}
 
 
@@ -208,6 +218,8 @@ def ui_category(name: str) -> str:
         return "deploy"
     if name.startswith("schedule_"):
         return "schedule"
+    if name.startswith("mcp_"):
+        return "mcp"
     return name
 
 
@@ -251,6 +263,10 @@ def describe(name: str, args: dict) -> tuple[str, str]:
         return "Running parallel sub-agents", f"{len(args.get('items', []))} items"
     if name == "deploy_expose_port":
         return "Exposing port", str(args.get("port", ""))
+    if name == "mcp_search_tools":
+        return "Searching tools", args.get("query", "")
+    if name == "mcp_call_tool":
+        return "Using MCP", args.get("tool", "")
     if name == "schedule_create":
         return "Creating scheduled task", args.get("title", "")
     return ACTION_LABEL.get(cat, name), ""
