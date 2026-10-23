@@ -1,129 +1,309 @@
-# OpenManus：类 Manus 通用 Agent 平台
+<div align="center">
 
-参照 [Manus](https://manus.im) 的架构做的 clean-room 实现：用户给出任务，Agent 在**独立沙箱电脑**里自主规划、搜索、浏览网页、写代码、跑命令，完成后交付文件。前端实时展示每一步，并提供 “Manus 的电脑” 面板。
+# OpenManus
+
+**类 Manus 的开源通用 Agent 平台**
+
+给出任务，Agent 在独立的沙箱电脑里自己规划、搜索、浏览网页、写代码、跑命令，最后交付文件。
+
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688)
+![Docker](https://img.shields.io/badge/sandbox-Docker-2496ED)
+![Frontend](https://img.shields.io/badge/frontend-vanilla%20JS-F7DF1E)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+[功能](#功能) · [快速开始](#快速开始) · [配置](#配置) · [架构](#架构) · [开发](#开发) · [贡献](#贡献)
+
+</div>
+
+---
+
+## 目录
+
+- [简介](#简介)
+- [功能](#功能)
+- [快速开始](#快速开始)
+- [配置](#配置)
+- [使用](#使用)
+- [架构](#架构)
+- [项目结构](#项目结构)
+- [开发](#开发)
+- [安全](#安全)
+- [贡献](#贡献)
+- [许可证](#许可证)
+- [致谢](#致谢)
+
+## 简介
+
+OpenManus 参照 [Manus](https://manus.im) 的架构做了一份 clean-room 实现。每个任务分配一台独立的沙箱电脑（Docker 容器），Agent 在里面按「分析 → 选工具 → 执行 → 观察 → 迭代 → 交付」的循环工作。前端实时展示每一步，并提供可回放、可接管的「电脑」面板。
 
 实现原理分析（含 REA 逆向证据）见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 功能
+
+### Agent 内核
+
 - **Agent Loop**：分析事件 → 选择工具 → 沙箱执行 → 观察 → 迭代 → 交付 → idle
-- **47 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`（一次 1–3 个查询并发）、`info_search_image`（图片）、`info_search_scholar`（OpenAlex 学术文献）、`info_extract_webpage`、`deploy_expose_port`、`deploy_publish`、`message_*`、`plan_update`、`agent_map_reduce`、`agent_delegate`、`schedule_create`、`trigger_create`、`knowledge_save`、`slides_export`、`media_generate_image/speech/video`、`mcp_*`、`idle`
-- **并行工具调用**：一轮里如果全是只读调用（搜索、网页提取、读文件），就并发执行
-- **Planner 模块**：结构化输出生成计划
-- **技能**（"更多 → 技能"）：官方技能（`backend/skills/`）、个人技能（手动编写、上传 SKILL.md/zip、或让 Agent 用内置的技能创建器写好后在文件卡片上"添加到我的技能"）、第三方技能（从 GitHub 目录导入，探索页有精选目录）；可启用/停用、在线编辑、统计使用次数；输入框"+ → 使用技能"把技能指定给当前消息（对应 Manus 的 `enabledSkills`）。启用的技能整目录装进沙箱，上下文里只放名称和触发说明，Agent 按需读取
-- **交付语义**：`chat.deliveryKind` 分为 `opening` / `progress` / `result`；任务结束后生成追问建议（`suggestion` 步骤）
-- **Wide Research**：`agent_map_reduce` 并行派发同构子代理
-- **上下文工程**：静态前缀加 prompt caching、只追加的历史、按前缀遮蔽工具、可恢复压缩（大观察结果落盘到沙箱）、错误保留、计划复述
-- **沙箱**：每会话一个 Docker 容器（Ubuntu + Python + Node + Chromium），通过动作 API 控制；端口预览代理；与服务器同一时区
-- **实时画面与接管**：浏览器跑在 Xvfb 虚拟显示器上，经 VNC 实时推到"电脑"面板（noVNC）；用户可一键接管浏览器（登录、验证码），结束后交还 Agent
-- **操作确认**：部署、推送代码、发布、对外发送数据、远程登录、大范围删除等操作会挂起（`need_confirm`），用户允许后才执行，拒绝则作为错误返回模型
-- **执行前确认计划 / 排队 / 工具参数流式状态**："+ → 执行前确认计划"让 Planner 的计划先交给你确认（可直接逐行修改，或直接输入修改意见让它重新规划，对应 Manus 的 `confirm_submit_plan`）；任务运行中输入新消息时可选"排队"（`deliveryMode: queue`，当前任务完成后依次执行）或直接发送插话；模型还在生成工具参数时，步骤就以 `streaming` 状态出现
-- **首页 Studio 与灵感**：输入框下的创作入口（视频、网站应用游戏、从本地文件开始、幻灯片与图片）和按天轮换的灵感模板，"查看全部"按幻灯片 / 网站 / 游戏 / 应用 / 图片 / 视频 / 调研 / 数据 / 效率分类；选用后预填指令并指定相应技能
-- **数据管理与开发者 API**："设置 → 数据管理"导出个人全部数据（zip）或删除所有任务；"设置 → 开发者"创建 API 密钥（只显示一次、哈希保存），用 `POST /api/v1/tasks`、`GET /api/v1/tasks/<id>`、`POST /api/v1/tasks/<id>/messages` 从脚本创建任务、查询状态与结果、追加消息
-- **Agent 邮箱**：配置邮箱后 Agent 拥有自己的邮箱，`email_send` 发信（可附沙箱文件，每次发送都需确认）、`email_check` 读取收件箱
-- **Agent 电话**：配置 `MANUS_TWILIO_ACCOUNT_SID` / `_AUTH_TOKEN` / `_NUMBER` 后，Agent 可用 `phone_sms` 发短信、`phone_call` 拨打电话并朗读消息（每次都需确认）
-- **飞书机器人（集成）**：把飞书应用的事件订阅地址设为 `/api/integrations/feishu/events`（订阅 `im.message.receive_v1`），在飞书里私聊或 @ 机器人即可派任务，完成后在原会话回复结果和任务链接；复用 `MANUS_FEISHU_APP_ID` / `_SECRET`，可设 `MANUS_FEISHU_VERIFICATION_TOKEN` 校验事件
-- **Mail Manus**：配置 `MANUS_MAIL_IMAP_HOST` / `MANUS_MAIL_USER` / `MANUS_MAIL_PASSWORD` 后每分钟收取新邮件，每封邮件成为一个任务（主题和正文是需求，附件上传到沙箱）；配置 `MANUS_MAIL_SMTP_HOST` 后任务完成时把结果和文件链接回信给发件人；多用户模式下只接受成员登记邮箱发来的邮件
-- **多用户登录**：没有账号时保持单用户模式；在"设置 → 账户"创建管理员后启用登录（现有数据归管理员），管理员在"成员"中添加账号。任务、项目、定时任务、触发器、站点、云电脑、设备、Agent 与团队、个性化按用户隔离；技能库与插件连接器为组织共享。支持飞书登录（`MANUS_FEISHU_APP_ID` / `MANUS_FEISHU_APP_SECRET`，`MANUS_FEISHU_AUTO_SIGNUP` 控制新飞书用户是否自动开通）；`MANUS_AUTH=off` 强制单用户
-- **交付后推荐、用量与通知**：交付报告、数据、网页、图片等文件后，在结果下给出下一步操作（如"做成网页""做成幻灯片""做成数据看板"，对应 `fileOperationPromotion`）；每个任务累计运行时长、模型调用、输入/输出/缓存命中 tokens 和工具调用（对应 `cascadeTaskClock`），点击左下角账户打开"设置 → 用量"按模型、日期、任务查看；"设置 → 通用"可开启桌面通知（页面在后台时任务完成或需要你时提醒）
-- **流式输出**：回复和 `message_*` 的文本边生成边推送（`chatDelta`）
-- **文件持久化与资料库**：Agent 写入/交付的文件和用户上传都另存到会话目录，容器删除后仍可下载；"资料库"跨任务浏览，按文本和 PDF / 幻灯片 / 表格 / 图片 / 视频 / 音频 / 其他筛选、预览
-- **模式与 Flex**：顶栏切换 Max / 标准 / Lite（网关上的不同模型和推理强度）；Flex 用自己的密钥接 OpenAI、Anthropic、Google、xAI、DeepSeek、Kimi、智谱、通义千问、硅基流动、OpenRouter、Fireworks 或任意 OpenAI 兼容端点，也可直接选网关上的其他模型
-- **插件**：侧栏"插件"按效率 / 创作 / 商业 / 开发 / 财经 / 出行浏览 25 个预置 MCP 连接器（飞书、Notion、GitHub、高德地图、百度地图、Context7、DeepWiki、Stripe、Supabase、ElevenLabs、MiniMax 等），填好密钥即可连接；命令行密钥经环境变量传入、URL 中的密钥在列表中打码；只读查询类插件（文档、搜索、地图、行情、时间）调用免确认
-- **连接器（MCP）**：stdio / Streamable HTTP / SSE；工具不进工具表，Agent 用 `mcp_search_tools` 按需检索、`mcp_call_tool` 调用；非只读工具调用前需确认
-- **分享回放**：生成只读链接（可撤销），访客可浏览工作日志、电脑面板并按原节奏回放
-- **Wide Research 控制**：运行中可停止/重试单个子任务、强制继续；已完成项可在重跑时复用
-- **项目**：项目指令 + 项目文件，项目内的任务自动获得指令并把文件复制到沙箱 `~/project/`
-- **沙箱回收**：空闲（默认 15 分钟）且无人观看、任务不在运行的沙箱自动停止，保留文件，下次使用自动启动
-- **Agent 与团队**：侧栏"Agent"创建有专门职责的 Agent（名称、图标、介绍、职责与要求、默认模式、常用技能），并组建团队（成员 + 负责人）。与 Agent 开始的任务按它的角色工作；交给团队的任务由负责人拆分，用 `agent_delegate` 把子任务派给成员（同一轮多个委派并行），成员以各自的指令在同一沙箱中工作并回报，负责人汇总交付
-- **电脑（云电脑）**：创建长期存在的电脑（模板：运行自动化、构建并托管应用、Blender 渲染、游戏服务器、数据处理工作站、自定义；可选 CPU / 内存，空闲自动关机或始终在线）。文件、软件和后台服务跨任务保留；可在"电脑"页查看桌面（noVNC，可直接操作）、使用终端、开放端口（固定的独立域名地址 `pc-<id>-<端口>.<域名>`）、开关机；输入框"+ → 运行位置"让任务在指定电脑上运行；后端重启后自动重新连接仍在运行的电脑
-- **连接本机（本地计算机 / My Browser）**："电脑 → 连接新计算机"生成一次性令牌和三条命令；在自己的电脑上运行 `device/openmanus_device.py`，它在本机启动动作服务，并通过一条主动发起的 WebSocket 隧道让 OpenManus 调用（本机不开放任何端口）。任务可选择在这台电脑上运行；每条命令、每次写文件都先请你确认（可对设备开启"信任"）；技能装在隐藏目录 `.openmanus/skills`。加 `--my-browser http://127.0.0.1:9222` 时，Agent 在你自己的 Chrome 里新开标签页工作，沿用你的登录状态
-- **技能录制器**（"更多 → Computer Use"，或"技能 → 创建 → 录制工作流"）：在云端浏览器（弹窗里直接操作实时画面）或已连接设备上你自己的 Chrome 里演示一遍流程；页面脚本记录打开的页面、点击的元素和填写的内容（密码等敏感字段只记"需要询问用户"），停止后由模型把它概括成带参数的 SKILL.md 草稿，检查修改后保存为个人技能
-- **创作（站点托管）**：`deploy_publish` 把沙箱里的静态网站 / 游戏 / 应用（含 index.html 的目录）复制到服务器上的版本化存储，沙箱回收后仍在线；重复发布生成新版本，可在"创作"页切换版本、复制链接、下线。每个站点有独立域名 `<slug>.localhost:8000`（浏览器把 *.localhost 解析到本机；`MANUS_SITES_DOMAIN` 可改为自己的泛域名），与 OpenManus 不同源，站点脚本无法访问其 API；另有带 CSP sandbox 的路径地址 `/sites/<slug>/`。发布前需要确认，发布时在沙箱里截取首页作为封面
-- **创作：幻灯片与媒体生成**：内置"幻灯片"技能与 HTML 模板（1280×720，查看器支持翻页和缩放），`slides_export` 在沙箱里逐页渲染为图片，并导出矢量 PDF 和 PPTX（每页一张图，保留演讲者备注）；电脑面板提供翻页预览和下载。`media_generate_image` 经网关生成或编辑图片（参考图、画幅比例），生成后把缩略图交给模型自检；语音、视频生成接口按 OpenAI 兼容协议实现，模型通过 `MANUS_TTS_MODEL` / `MANUS_VIDEO_MODEL` 开启
-- **个性化**（"更多 → 个性化"）：昵称、职业、关于你、自定义指令对所有任务生效；"知识"保存长期事实和偏好，可启用/停用；任务中 Agent 用 `knowledge_save` 提议记住某条信息，用户在对话里一键接受或忽略；"从其他 AI 导入记忆"把其他助手的记忆导出解析成资料和知识，确认后再写入
-- **自动化**：
-  - 定时任务：仅一次 / 按间隔 / 每天 / 每周，到点自动新建任务运行（`schedule_create`）
-  - 触发器：**条件触发**用自然语言描述条件，按间隔由只读的"观察者"Agent 查证（记住上次观察到的状态，能识别"降价""有新帖"这类变化），满足时才新建任务；**Webhook 触发**生成专属地址，外部系统 POST 事件即新建任务，载荷作为上下文（`trigger_create`）
-  - 高级自动化：用自己的话描述"何时做什么"，模型解析成定时任务或触发器，确认后保存
-  - 动态：按天列出所有自动运行和条件检查结果，附交付文件
-- **界面**：按 Manus 2.0 网页端还原（用 REA/CDP 实测的布局、设计变量和交互）：可折叠的工作日志与步骤分组、结果文件卡片与预览、追问建议、带时间轴回放的"电脑"面板、计划进度条、浅色/深色主题
-- **实时协议**：WebSocket 上传输 Manus 同构事件（`chat`/`toolUsed`/`planUpdate`/`statusUpdate`），支持断线续传、运行中追加消息、向用户提问、停止后恢复
+- **47 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`（一次并发 1–3 个查询）、`info_search_image`、`info_search_scholar`（OpenAlex）、`info_extract_webpage`、`deploy_*`、`message_*`、`plan_update`、`agent_map_reduce`、`agent_delegate`、`schedule_create`、`trigger_create`、`knowledge_save`、`slides_export`、`media_generate_*`、`email_*`、`phone_*`、`mcp_*`、`idle`
+- **并行工具调用**：一轮里全是只读调用（搜索、网页提取、读文件）时并发执行
+- **Planner**：用结构化输出生成计划；可开启「执行前确认计划」，逐行修改或用自然语言要求重新规划
+- **Wide Research**：`agent_map_reduce` 并行派发同构子代理；运行中可停止、重试单个子任务或强制继续，重跑时复用已完成项
+- **上下文工程**：静态前缀加 prompt caching、只追加的历史、按前缀遮蔽工具、可恢复压缩（大观察结果落盘到沙箱）、保留错误、复述计划
+- **交付语义**：`opening` / `progress` / `result` 三类交付；结束后生成追问建议和下一步操作推荐（做成网页、幻灯片、数据看板等）
+- **流式与排队**：回复和工具参数边生成边推送；任务运行中的新消息可排队或直接插话
+
+### 沙箱与电脑
+
+- **会话沙箱**：每个会话一个 Docker 容器（Ubuntu + Python + Node + Chromium），通过动作 API 控制；提供端口预览代理，时区与服务器一致；空闲（默认 15 分钟）且无人观看时自动停止，保留文件
+- **实时画面与接管**：浏览器跑在 Xvfb 上，经 noVNC 推到「电脑」面板；用户可一键接管（登录、验证码）后交还 Agent
+- **云电脑**：长期存在的机器，带模板（自动化、应用托管、Blender 渲染、游戏服务器等），可选 CPU / 内存与关机策略；支持桌面、终端、固定域名端口 `pc-<id>-<端口>.<域名>`，任务可指定在某台电脑上运行
+- **连接本机**：在自己的电脑上运行 `device/openmanus_device.py`，通过主动发起的 WebSocket 隧道接入（本机不开放端口）；每条命令和每次写文件都先确认；加 `--my-browser http://127.0.0.1:9222` 后 Agent 直接用你的 Chrome 和登录状态
+
+### 技能、插件与连接器
+
+- **技能库**：官方技能（`backend/skills/`）、个人技能（手写、上传 SKILL.md/zip，或由 Agent 编写后一键收藏）、第三方技能（从 GitHub 导入）；可按消息指定技能。上下文里只放名称和触发说明，Agent 按需读取
+- **技能录制器**：在云端浏览器或你自己的 Chrome 里演示一遍流程，模型把它整理成带参数的 SKILL.md 草稿（密码等敏感字段只记为「需询问用户」）
+- **插件**：25 个预置 MCP 连接器（飞书、Notion、GitHub、高德/百度地图、Context7、DeepWiki、Stripe、Supabase、ElevenLabs、MiniMax 等），填写密钥即可使用
+- **MCP 连接器**：支持 stdio / Streamable HTTP / SSE；工具不直接进工具表，Agent 用 `mcp_search_tools` 检索、`mcp_call_tool` 调用
+
+### 创作
+
+- **站点托管**：`deploy_publish` 把沙箱里的网站、游戏或应用发布到版本化存储，每个站点有独立域名 `<slug>.<域名>`，与主站不同源；可切换版本、下线
+- **幻灯片**：内置模板（1280×720），`slides_export` 导出图片、矢量 PDF 和 PPTX（保留演讲者备注）
+- **媒体生成**：经网关生成或编辑图片，生成后模型会自检缩略图；语音、视频生成按 OpenAI 兼容协议实现
+
+### 自动化与集成
+
+- **定时任务**：一次 / 间隔 / 每天 / 每周，到点新建任务
+- **触发器**：条件触发（只读的观察者 Agent 定期查证，能识别「降价」「有新帖」这类变化）和 Webhook 触发；也可用自然语言描述「何时做什么」，由模型解析
+- **Mail Manus**：配置 IMAP 后每封来信成为一个任务（附件上传到沙箱），配置 SMTP 后把结果回信给发件人
+- **Agent 邮箱与电话**：`email_send` / `email_check` 收发邮件；接入 Twilio 后 `phone_sms` 发短信、`phone_call` 拨电话（每次发送都需确认）
+- **飞书机器人**：在飞书里私聊或 @ 机器人派任务，完成后回到原会话回复
+- **开发者 API**：在设置中创建 API 密钥，通过 `POST /api/v1/tasks`、`GET /api/v1/tasks/<id>`、`POST /api/v1/tasks/<id>/messages` 从脚本调用
+
+### 协作与管理
+
+- **Agent 与团队**：创建有专门职责的 Agent，并组建团队；负责人用 `agent_delegate` 把子任务并行派给成员，最后汇总交付
+- **项目**：项目指令和项目文件，项目内的任务自动带上指令，文件复制到沙箱 `~/project/`
+- **个性化**：昵称、职业、自定义指令对所有任务生效；长期「知识」可由 Agent 提议、用户确认；支持从其他 AI 导入记忆
+- **多用户**：创建管理员后启用登录，数据按用户隔离，技能和插件组织共享；支持飞书登录
+- **操作确认**：部署、推送、发布、对外发送、远程登录、大范围删除等操作会挂起，用户允许后才执行
+- **分享回放**：生成可撤销的只读链接，访客可按原节奏回放工作日志和电脑面板
+- **资料库与数据**：交付文件和上传另存到会话目录，容器删除后仍可下载；支持跨任务浏览筛选、导出全部数据或删除所有任务
+- **用量统计与通知**：按任务、模型、日期统计运行时长、调用次数和 tokens（含缓存命中）；可开启桌面通知
+
+### 模型与界面
+
 - **模型**：通过 LiteLLM 网关以 OpenAI chat completions 协议调用（默认 `claude-opus-5-5`）；`reasoning_effort` 映射为自适应思考，签名思考块在工具调用间回传，`cache_control` 做提示缓存
+- **模式与 Flex**：Max / 标准 / Lite 三档；Flex 可用自己的密钥接 OpenAI、Anthropic、Google、xAI、DeepSeek、Kimi、智谱、通义千问、硅基流动、OpenRouter、Fireworks 或任意 OpenAI 兼容端点
+- **界面**：按 Manus 2.0 网页端还原（布局、设计变量和交互经 REA/CDP 实测），含工作日志、文件预览、时间轴回放、计划进度条、浅色/深色主题；可安装为 PWA 在手机上使用
+- **实时协议**：WebSocket 传输与 Manus 同构的事件（`chat` / `toolUsed` / `planUpdate` / `statusUpdate`），支持断线续传、运行中追加消息、向用户提问、停止后恢复
 
 ## 快速开始
 
-```bash
-# 1. 凭据
-cp .env.example .env                  # 填 MANUS_LLM_API_KEY（LiteLLM 虚拟 key）
-set -a; source .env; set +a
-# .env 里的 TAVILY_API_KEY 可选；不设置时回退到 DuckDuckGo
+### 前置要求
 
-# 2a. 生产模式：Docker 沙箱（推荐）
+- Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)
+- Docker（生产模式需要）
+- 一个 LiteLLM（或其他 OpenAI 兼容）网关及其 API key
+
+### 安装与运行
+
+```bash
+git clone https://github.com/Lzhtommy/rea-openmanus.git
+cd rea-openmanus
+
+# 1. 配置凭据
+cp .env.example .env          # 至少填写 MANUS_LLM_BASE_URL 和 MANUS_LLM_API_KEY
+set -a; source .env; set +a
+```
+
+**方式 A：Docker 沙箱（推荐）**
+
+```bash
 docker build -t manus-sandbox:latest sandbox/
 cd backend && uv sync && uv run uvicorn app.main:app --port 8000
+```
 
-# 2b. 开发模式：本地沙箱（命令直接在本机执行，仅供开发调试！）
-cd sandbox && uv venv .venv && uv pip install -p .venv/bin/python -r requirements.txt && .venv/bin/python -m playwright install chromium
+**方式 B：本地沙箱（仅供开发调试，命令直接在本机执行）**
+
+```bash
+cd sandbox && uv venv .venv \
+  && uv pip install -p .venv/bin/python -r requirements.txt \
+  && .venv/bin/python -m playwright install chromium
 cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --port 8000
 ```
 
-打开 http://localhost:8000 即可使用。
+启动后打开 <http://localhost:8000>。
 
-## 配置（环境变量）
+## 配置
+
+所有配置都通过环境变量设置，参考 [`.env.example`](.env.example)。
+
+### 核心
+
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `MANUS_LLM_BASE_URL` | — | LiteLLM 网关地址（OpenAI 兼容），必填 |
+| `MANUS_LLM_BASE_URL` | — | LiteLLM 网关地址（OpenAI 兼容），**必填** |
 | `MANUS_LLM_API_KEY` | — | 网关 key（也可用 `LITELLM_API_KEY`） |
 | `MANUS_MODEL` | `claude-opus-5-5` | 网关上的模型名 |
-| `MANUS_REASONING` | `true` | 是否发送 `reasoning_effort` |
-| `MANUS_PROMPT_CACHE` | `true` | 是否加 `cache_control` 缓存断点 |
-| `MANUS_EFFORT` / `MANUS_SUBAGENT_EFFORT` | `high` / `medium` | 主代理、子代理的推理强度 |
-| `MANUS_SANDBOX` | `docker` | `docker` 或 `local` |
-| `MANUS_SITES_DOMAIN` | `PUBLIC_BASE_URL` 的主机 | 已发布站点的域名后缀（站点地址为 `<slug>.<域名>`，需泛解析到本服务） |
-| `MANUS_IMAGE_MODEL` / `MANUS_TTS_MODEL` / `MANUS_VIDEO_MODEL` | 空 | 网关上的图片 / 语音 / 视频生成模型，留空即关闭该能力 |
-| `MANUS_SANDBOX_MEMORY` / `MANUS_SANDBOX_CPUS` | `4g` / `2` | 容器资源限制 |
-| `MANUS_PLANNER` | `true` | 是否启用 Planner 模块 |
-| `MANUS_CONFIRM` | `true` | 有外部影响的操作是否需要用户确认 |
-| `MANUS_MODEL_MAX` / `MANUS_MODEL_LITE` | 同 `MANUS_MODEL` | Max / Lite 模式使用的网关模型 |
+| `MANUS_MODEL_MAX` / `MANUS_MODEL_LITE` | 同 `MANUS_MODEL` | Max / Lite 模式使用的模型 |
 | `MANUS_DEFAULT_MODE` | `standard` | 新任务默认模式 |
-| `MANUS_SANDBOX_IDLE_MINUTES` | `15` | 沙箱空闲多久后停止，`0` 关闭回收 |
+| `MANUS_REASONING` | `true` | 是否发送 `reasoning_effort` |
+| `MANUS_EFFORT` / `MANUS_SUBAGENT_EFFORT` | `high` / `medium` | 主代理、子代理的推理强度 |
+| `MANUS_PROMPT_CACHE` | `true` | 是否加 `cache_control` 缓存断点 |
+| `MANUS_PUBLIC_URL` | `http://localhost:8000` | 生成链接时使用的外部地址 |
+| `TAVILY_API_KEY` | 空 | 网页搜索；不设置时回退到 DuckDuckGo |
+
+### 沙箱
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `MANUS_SANDBOX` | `docker` | `docker` 或 `local` |
+| `MANUS_SANDBOX_MEMORY` / `MANUS_SANDBOX_CPUS` | `4g` / `2` | 容器资源限制 |
+| `MANUS_SANDBOX_IDLE_MINUTES` | `15` | 空闲多久后停止，`0` 关闭回收 |
 | `MANUS_SANDBOX_TZ` | 服务器时区 | 沙箱时区（POSIX TZ，例如 `<+08>-8`） |
+| `MANUS_SITES_DOMAIN` | `PUBLIC_BASE_URL` 的主机 | 已发布站点的域名后缀，需泛解析到本服务 |
+
+### Agent 行为
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `MANUS_PLANNER` | `true` | 是否启用 Planner |
+| `MANUS_CONFIRM` | `true` | 有外部影响的操作是否需要确认 |
 | `MANUS_SUGGESTIONS` | `true` | 任务结束后是否生成追问建议 |
 | `MANUS_BROWSER_VISION` | `true` | 是否把浏览器截图发给模型 |
-| `MANUS_OBSERVATION_LIMIT` | `12000` | 观察结果超过这个字符数就落盘压缩 |
+| `MANUS_OBSERVATION_LIMIT` | `12000` | 观察结果超过此字符数就落盘压缩 |
 | `MANUS_WIDE_CONCURRENCY` / `MANUS_WIDE_MAX_TASKS` | `4` / `20` | Wide Research 并发数和子任务上限 |
-| `MANUS_PUBLIC_URL` | `http://localhost:8000` | 生成预览链接时使用的外部地址 |
 
-## 目录
+### 可选能力
+
+| 变量 | 说明 |
+|---|---|
+| `MANUS_IMAGE_MODEL` / `MANUS_TTS_MODEL` / `MANUS_VIDEO_MODEL` | 网关上的图片 / 语音 / 视频生成模型 |
+| `MANUS_MAIL_IMAP_HOST` / `MANUS_MAIL_USER` / `MANUS_MAIL_PASSWORD` | Mail Manus 收信 |
+| `MANUS_MAIL_SMTP_HOST` | Mail Manus 回信 |
+| `MANUS_TWILIO_ACCOUNT_SID` / `_AUTH_TOKEN` / `_NUMBER` | Agent 电话（短信、语音） |
+| `MANUS_FEISHU_APP_ID` / `MANUS_FEISHU_APP_SECRET` | 飞书登录与飞书机器人 |
+| `MANUS_FEISHU_VERIFICATION_TOKEN` | 校验飞书事件 |
+| `MANUS_FEISHU_AUTO_SIGNUP` | 新飞书用户是否自动开通账号 |
+| `MANUS_AUTH` | 设为 `off` 强制单用户模式 |
+
+## 使用
+
+- **Web 界面**：打开首页输入任务即可；输入框的「+」菜单可指定技能、运行位置、执行前确认计划
+- **飞书机器人**：把飞书应用的事件订阅地址设为 `/api/integrations/feishu/events`（订阅 `im.message.receive_v1`）
+- **API**：
+
+  ```bash
+  curl -X POST http://localhost:8000/api/v1/tasks \
+    -H "Authorization: Bearer <API_KEY>" \
+    -H "Content-Type: application/json" \
+    -d '{"prompt": "调研 2026 年开源 Agent 框架并整理成表格", "mode": "standard"}'
+  # → {"id": "...", "url": "...", "status": "..."}
+
+  curl http://localhost:8000/api/v1/tasks/<id> -H "Authorization: Bearer <API_KEY>"
+
+  curl -X POST http://localhost:8000/api/v1/tasks/<id>/messages \
+    -H "Authorization: Bearer <API_KEY>" \
+    -H "Content-Type: application/json" \
+    -d '{"content": "再补充一列 GitHub star 数"}'
+  ```
+
+  API 密钥在「设置 → 开发者」中创建（`om_` 开头，只显示一次）；`mode` 可选 `max` / `standard` / `lite`。
+
+## 架构
+
 ```
-backend/app/
-  main.py       HTTP + WebSocket API、文件上传下载、端口预览代理
-  session.py    会话：事件日志、LLM 历史、计划、收件箱、Planner/Skills 注入、追问建议
-  agent.py      Agent 循环、工具分发、可恢复压缩、Wide Research
-  llm.py        LiteLLM 网关客户端：Anthropic 块格式历史 ↔ OpenAI chat 格式转换、缓存、思考、Planner
-  tools.py      动作空间定义（统一前缀、角色遮蔽、UI 分类）
-  prompts.py    静态系统提示词、Planner 提示词、子代理任务说明
-  sandbox.py    沙箱生命周期（Docker / 本地）和动作 API 客户端
-  search.py     网页搜索（Tavily / DuckDuckGo）
-  skills.py     Skills 目录加载、装入沙箱
-  scheduler.py  定时任务（下次运行时间计算、后台循环、按计划新建会话）
-  providers.py  模式与 Flex 提供商（目录、密钥存储、按会话解析模型配置）
-  connectors.py MCP 连接器（长连接会话、工具检索与调用、确认规则）
-  projects.py   项目（指令、文件、装入沙箱）
-backend/skills/     Skills（<name>/SKILL.md）
-backend/tests/      端到端测试（脚本化模型，不需要 API key）
+┌──────────────┐  WebSocket / HTTP  ┌──────────────────────────────┐   动作 API   ┌───────────────────┐
+│  前端 (JS)   │ ◀────────────────▶ │  后端 (FastAPI)               │ ◀──────────▶ │ 沙箱 (Docker)      │
+│  工作日志     │   Manus 同构事件    │  Session · Agent Loop        │              │ shell · 文件       │
+│  电脑面板     │                    │  Planner · 工具分发 · 压缩     │              │ Chromium + Xvfb   │
+└──────────────┘                    └──────────────┬───────────────┘              └───────────────────┘
+                                                   │ OpenAI 协议
+                                            ┌──────▼──────┐
+                                            │ LiteLLM 网关 │
+                                            └─────────────┘
+```
+
+详细的设计说明和与 Manus 的对照见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+## 项目结构
+
+```
+backend/
+  app/
+    main.py         HTTP + WebSocket API、文件上传下载、端口预览代理
+    session.py      会话：事件日志、LLM 历史、计划、收件箱、追问建议
+    agent.py        Agent 循环、工具分发、可恢复压缩、Wide Research
+    llm.py          LiteLLM 网关客户端（Anthropic 块格式 ↔ OpenAI chat 格式）
+    tools.py        动作空间定义（统一前缀、角色遮蔽、UI 分类）
+    prompts.py      系统提示词、Planner 提示词、子代理说明
+    sandbox.py      沙箱生命周期（Docker / 本地）和动作 API 客户端
+    search.py       网页搜索（Tavily / DuckDuckGo）
+    skills.py       技能加载与装入沙箱
+    connectors.py   MCP 连接器
+    plugins.py      预置插件目录
+    scheduler.py    定时任务
+    triggers.py     条件触发与 Webhook 触发
+    projects.py     项目
+    agents.py       自定义 Agent 与团队
+    computers.py    云电脑
+    devices.py      连接本机
+    sites.py        站点托管
+    media.py        图片 / 语音 / 视频生成
+    recordings.py   技能录制器
+    personal.py     个性化与知识
+    providers.py    模式与 Flex 提供商
+    auth.py         多用户与登录
+    apikeys.py      开发者 API 密钥
+    mail.py         Mail Manus 与 Agent 邮箱
+    phone.py        Agent 电话（Twilio）
+    feishu_bot.py   飞书机器人
+  skills/           官方技能（<name>/SKILL.md）
+  tests/            端到端测试
 sandbox/            沙箱镜像（Dockerfile）和沙箱内动作 API 服务（server.py）
-frontend/           Web 界面（原生 JS，无需构建）
-docs/ARCHITECTURE.md  Manus 原理分析和复刻对照
+device/             连接本机用的设备端程序
+frontend/           Web 界面（原生 JS，无需构建，支持 PWA）
+docs/               架构文档
 ```
 
-## 测试
+## 开发
+
+### 运行测试
+
 ```bash
 cd backend && MANUS_SANDBOX=local uv run python -m pytest tests -q
 ```
-测试会启动真实的本地沙箱，用脚本化模型覆盖全部工具类别、Planner、提问等待、并行子代理、可恢复压缩、停止后修复历史，以及端口预览代理。
 
-## 安全提示
-- `local` 模式下 Agent 的命令直接在宿主机执行，只能用于开发。
-- Docker 模式下沙箱以非 root 用户运行（有 sudo），网络不受限；如果需要出网管控，请在容器网络层配置。
-- 搜索 API key 只保存在编排层，不会注入沙箱。
+测试使用脚本化模型，**不需要 API key**。它会启动真实的本地沙箱，覆盖全部工具类别、Planner、提问等待、并行子代理、可恢复压缩、停止后修复历史以及端口预览代理。
+
+### 前端
+
+前端是原生 JS，没有构建步骤，修改 `frontend/` 下的文件后刷新页面即可。
+
+## 安全
+
+- `local` 模式下 Agent 的命令直接在宿主机执行，**只能用于开发**。
+- Docker 模式下沙箱以非 root 用户运行（有 sudo），网络不受限；如需出网管控，请在容器网络层配置。
+- 搜索等 API key 只保存在编排层，不会注入沙箱。
+- 有外部影响的操作默认需要用户确认（`MANUS_CONFIRM`）。
+
+发现安全问题时请私下联系维护者，不要公开提交 issue。
+
+## 贡献
+
+欢迎提交 issue 和 pull request：
+
+1. Fork 本仓库并创建分支：`git checkout -b feature/your-feature`
+2. 提交修改并确保测试通过
+3. 推送分支并发起 pull request，说明改动内容和动机
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
+
+## 致谢
+
+- [Manus](https://manus.im)：本项目参照的产品与架构
+- [LiteLLM](https://github.com/BerriAI/litellm)、[FastAPI](https://fastapi.tiangolo.com/)、[Playwright](https://playwright.dev/)、[noVNC](https://novnc.com/)、[Model Context Protocol](https://modelcontextprotocol.io/)
