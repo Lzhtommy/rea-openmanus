@@ -744,3 +744,18 @@ textarea.code-edit { font: 13px/20px var(--font-mono); min-height: 52vh; }
 .auth-card label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
 .auth-card input { font: 14px var(--font); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border-dark); background: var(--bg-white); color: var(--text-primary); outline: none; }
 .auth-card .btn { height: 40px; justify-content: center; display: flex; align-items: center; text-decoration: none; }
+
+/* ---- home Studio and ideas */
+.studio { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 18px; }
+.studio-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px; border-radius: 14px; border: 1px solid var(--border-main); background: var(--bg-white); text-align: left; }
+.studio-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.06); }
+.studio-ico { width: 32px; height: 32px; border-radius: 9px; background: var(--fill-blue); color: var(--text-blue); display: flex; align-items: center; justify-content: center; margin-bottom: 6px; }
+.studio-t { font-size: 14px; font-weight: 500; color: var(--text-primary); } .studio-s { font-size: 12px; color: var(--text-tertiary); }
+.ideas-head { display: flex; align-items: center; justify-content: space-between; margin: 22px 0 8px; font-size: 13px; color: var(--text-tertiary); }
+.ideas { display: flex; flex-wrap: wrap; gap: 8px; }
+.ideas.grid { padding: 14px 18px 18px; max-height: 60vh; overflow: auto; }
+.idea { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-main); background: var(--bg-white); font-size: 13px; color: var(--text-primary); }
+.idea:hover { background: var(--fill-hover); }
+#ideas-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.ideas-card { width: min(760px, 100%); }
+@media (max-width: 760px) { .studio { grid-template-columns: repeat(2, 1fr); } }

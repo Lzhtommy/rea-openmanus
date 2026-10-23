@@ -66,14 +66,12 @@
         <div class="home-inner">
           <h1 class="greeting">你好<br /><span>我能为你做什么？</span></h1>
           <div id="home-slot"></div>
-          <div class="examples">
-            <button class="example" data-example="调研 2026 年主流开源大模型推理框架（vLLM、SGLang、TensorRT-LLM 等），对比性能与特性，输出一份 Markdown 报告"><span data-icon="search"></span>调研推理框架</button>
-            <button class="example" data-example="用 HTML/JS 写一个可以在浏览器里玩的贪吃蛇小游戏，部署出预览链接"><span data-icon="globe"></span>做一个网页小游戏</button>
-            <button class="example" data-example="打开 https://news.ycombinator.com ，总结当前首页前 10 条新闻并给出每条的链接"><span data-icon="compass"></span>总结 Hacker News</button>
-            <button class="example" data-example="用 Python 生成一份 2015-2025 年中国 GDP 增速的折线图，并写一段简要分析"><span data-icon="chart"></span>数据分析与图表</button>
-          </div>
+          <div class="studio" id="studio"></div>
+          <div class="ideas-head"><span>灵感</span><button class="btn ghost sm" id="ideas-all">查看全部</button></div>
+          <div class="ideas" id="ideas"></div>
         </div>
       </div>
+
 
       <div id="library" class="hidden">
         <div class="lib-inner">
@@ -337,6 +335,14 @@
       <button class="btn primary" type="submit">登录</button>
       <a class="btn ghost hidden" id="auth-feishu" href="/api/auth/feishu/login">使用飞书登录</a>
     </form>
+  </div>
+
+  <div id="ideas-modal" class="hidden">
+    <div class="sched-card ideas-card">
+      <div class="viewer-head"><div class="viewer-title"><div style="font-size:16px;font-weight:500">全部创意</div></div><button type="button" class="icon-btn" id="ideas-close" data-icon="x"></button></div>
+      <div class="lib-tabs" id="ideas-tabs" style="padding:10px 18px 0"></div>
+      <div class="ideas grid" id="ideas-grid"></div>
+    </div>
   </div>
 
   <div id="settings-modal" class="hidden">

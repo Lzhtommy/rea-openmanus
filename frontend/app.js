@@ -1962,6 +1962,53 @@ function renderAttachments() {
   $("#attach-list").innerHTML = (S.crew ? `<span class="chip-file target">${icon("users")}<span>与「${esc(crewName())}」一起</span><button type="button" data-rmcrew="1">${icon("x")}</button></span>` : "") + (pc ? `<span class="chip-file target">${icon(S.target.startsWith("dev:") ? "laptop" : "monitor")}<span>在「${esc(pc.name)}」上运行</span><button type="button" data-rmtarget="1">${icon("x")}</button></span>` : "") + S.pickedSkills.map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span><button type="button" data-rmskill="${esc(n)}">${icon("x")}</button></span>`).join("") + S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
 }
 
+// ------------------------------------------------------------------ home: Studio and ideas (首页) ---
+const STUDIO = [
+  { title: "创建你的视频", sub: "脚本、分镜、配音与成片", icon: "film", prompt: "帮我制作一支 30 秒的短视频：", skills: [] },
+  { title: "构建网站、应用和游戏", sub: "做好后发布成固定网址", icon: "gamepad", prompt: "帮我做一个网站：", skills: ["web-development"] },
+  { title: "从本地文件开始", sub: "上传文档、表格或图片", icon: "upload", action: "upload" },
+  { title: "创建幻灯片、图片", sub: "演示文稿、海报和配图", icon: "presentation", prompt: "帮我做一份幻灯片：", skills: ["slides"] },
+];
+const IDEAS = [
+  ["幻灯片", "把工作坊日程做成幻灯片", "把下面的工作坊日程做成一份 8 页左右的幻灯片，并导出 PDF 和 PPTX：", "slides"],
+  ["幻灯片", "季度汇报 PPT", "根据我提供的数据做一份季度经营汇报幻灯片，突出结论和趋势图表：", "slides"],
+  ["幻灯片", "产品发布会演示", "为一款新产品做发布会演示文稿，包含痛点、方案、功能亮点和定价：", "slides"],
+  ["网站", "把产品规格变成发布网站", "把下面的产品规格做成一个精美的产品发布单页网站，并发布出来：", "web-development"],
+  ["网站", "把简历做成个人网站", "把我的简历做成一个简洁专业的个人主页并发布：", "web-development"],
+  ["网站", "活动报名页", "做一个活动报名落地页，包含活动介绍、日程、嘉宾和报名表单，并发布：", "web-development"],
+  ["游戏", "网页版小游戏", "用 HTML/JS 做一个可以在浏览器里玩的小游戏（带计分和最高分记录），并发布：", "web-development"],
+  ["游戏", "知识问答游戏", "做一个关于我指定主题的问答闯关小游戏，并发布：", "web-development"],
+  ["应用", "个人预算应用", "做一个个人记账和预算应用（数据保存在浏览器里），并发布：", "web-development"],
+  ["应用", "番茄钟专注工具", "做一个番茄钟专注应用，带任务列表和统计，并发布：", "web-development"],
+  ["图片", "拍一组时尚大片", "生成一组 4 张风格统一的时尚大片：", ""],
+  ["图片", "活动海报", "为下面的活动设计一张宣传海报：", ""],
+  ["图片", "产品场景图", "为我的产品生成 3 张不同场景的宣传图：", ""],
+  ["视频", "创作一支动漫短片", "构思并制作一支动漫风格的短片：先写剧本和分镜，再生成画面：", ""],
+  ["视频", "美食广告", "为一家餐厅制作一支美食广告短片的脚本、分镜和画面：", ""],
+  ["调研", "行业深度调研", "调研下面这个行业的现状、主要玩家、市场规模和趋势，输出一份带引用的报告：", "deep-research"],
+  ["调研", "竞品对比分析", "对比分析下面几款产品的功能、定价和用户评价，做成表格和结论：", "deep-research"],
+  ["数据", "数据分析与图表", "分析我上传的数据表，找出关键规律并做成图表和结论：", "data-analysis"],
+  ["数据", "数据看板", "用我上传的数据做一个可交互的数据看板网页，并发布：", "data-analysis"],
+  ["效率", "会议纪要整理", "把下面的会议记录整理成标准会议纪要（结论、决议、待办）：", ""],
+];
+function useIdea(prompt, skills) {
+  goHome(); $("#input").value = prompt; S.pickedSkills = (skills || []).filter((n) => S.skills.skills.some((x) => x.name === n));
+  renderAttachments(); autoGrow(); renderComposerState(); $("#input").focus();
+  const i = $("#input"); i.setSelectionRange(i.value.length, i.value.length);
+}
+const ideaHtml = ([cat, title], i) => `<button class="idea" data-idea="${i}"><span class="lib-tag">${esc(cat)}</span><span>${esc(title)}</span></button>`;
+function renderHome() {
+  $("#studio").innerHTML = STUDIO.map((c, i) => `<button class="studio-card" data-studio="${i}"><span class="studio-ico">${icon(c.icon)}</span><span class="studio-t">${esc(c.title)}</span><span class="studio-s">${esc(c.sub)}</span></button>`).join("");
+  const day = Math.floor(Date.now() / 864e5), picks = [0, 3, 6, 10, 15, 17].map((k) => (k + day) % IDEAS.length);
+  $("#ideas").innerHTML = picks.map((i) => ideaHtml(IDEAS[i], i)).join("");
+}
+function openIdeas(cat = "全部") {
+  const cats = ["全部", ...new Set(IDEAS.map((x) => x[0]))];
+  $("#ideas-tabs").innerHTML = cats.map((c) => `<button class="lib-tab ${c === cat ? "on" : ""}" data-ideacat="${esc(c)}">${esc(c)}</button>`).join("");
+  $("#ideas-grid").innerHTML = IDEAS.map((x, i) => [x, i]).filter(([x]) => cat === "全部" || x[0] === cat).map(([x, i]) => ideaHtml(x, i)).join("");
+  $("#ideas-modal").classList.remove("hidden");
+}
+
 // ------------------------------------------------------------------ settings (设置) ---
 const SET_TABS = [["account", "账户", "user"], ["members", "成员", "users"], ["general", "通用", "sun"], ["usage", "用量", "chart"], ["shortcuts", "快捷键", "list"], ["personal", "个性化", "user"], ["skills", "技能", "spark"], ["plugins", "插件与连接器", "puzzle"]];
 const fmtNum = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n || 0));
@@ -2338,7 +2385,14 @@ function bind() {
     const item = e.target.closest(".session-item");
     if (item && item.dataset.id !== S.current) openSession(item.dataset.id);
   };
-  document.querySelectorAll("[data-example]").forEach((b) => b.onclick = () => { $("#input").value = b.dataset.example; autoGrow(); renderComposerState(); $("#input").focus(); });
+  renderHome();
+  $("#studio").onclick = (e) => { const b = e.target.closest("[data-studio]"); if (!b) return; const c = STUDIO[+b.dataset.studio];
+    if (c.action === "upload") { goHome(); $("#file-input").click(); return; } useIdea(c.prompt, c.skills); };
+  const ideaClick = (e) => { const b = e.target.closest("[data-idea]"); if (!b) return; const x = IDEAS[+b.dataset.idea]; $("#ideas-modal").classList.add("hidden"); useIdea(x[2], x[3] ? [x[3]] : []); };
+  $("#ideas").onclick = ideaClick; $("#ideas-grid").onclick = ideaClick;
+  $("#ideas-all").onclick = () => openIdeas();
+  $("#ideas-tabs").onclick = (e) => { const b = e.target.closest("[data-ideacat]"); if (b) openIdeas(b.dataset.ideacat); };
+  $("#ideas-close").onclick = () => $("#ideas-modal").classList.add("hidden");
 
   // delegated actions in the thread and taskbar
   document.addEventListener("click", (e) => {
