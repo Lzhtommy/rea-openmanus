@@ -17,7 +17,7 @@ import logging
 import time
 from pathlib import Path
 
-from . import config, llm, skills
+from . import config, llm, providers, skills
 from .agent import Agent, AgentHost, now_ms, render_plan, short_id
 from .sandbox import manager
 
@@ -39,6 +39,7 @@ class Session(AgentHost):
         self.approved: set[str] = set()
         self.files: dict[str, dict] = {}  # sandbox path -> stored copy (survives the sandbox)
         self.schedule_id: str | None = None  # set when a scheduled task started this session
+        self.model_selection: dict = {}  # {mode, provider?, model?} chosen in the UI (Manus' mode selector)
         self.task: asyncio.Task | None = None
         self.subscribers: set[asyncio.Queue] = set()
         self.dir = config.SESSIONS_DIR / sid
@@ -51,7 +52,8 @@ class Session(AgentHost):
 
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
-                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id}
+                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id,
+                "model": self.model_selection}
 
     def persist(self) -> None:
         (self.dir / "meta.json").write_text(json.dumps({**self.meta(), "envAnnounced": self.env_announced,
@@ -66,6 +68,7 @@ class Session(AgentHost):
         s.env_announced = meta.get("envAnnounced", False)
         s.files = meta.get("files", {})
         s.schedule_id = meta.get("scheduleId")
+        s.model_selection = meta.get("model") or {}
         s.status = meta.get("status", "idle")
         if s.status in ("running", "waiting"):
             s.status = "stopped"  # process restarted mid-run
@@ -189,6 +192,17 @@ class Session(AgentHost):
 
     # ------------------------------------------------------------- control ---
 
+    def select_model(self, selection: dict | None) -> None:
+        """Remember the mode/model for this task's next runs; invalid selections are ignored."""
+        if not selection:
+            return
+        try:
+            providers.resolve(selection)
+        except ValueError:
+            return
+        self.model_selection = {k: selection[k] for k in ("mode", "provider", "model") if selection.get(k)}
+        self.persist()
+
     async def user_message(self, text: str, attachments: list[str]) -> None:
         await self.emit({"type": "chat", "sender": "user", "messageType": "text", "content": text,
                          "attachments": [{"path": p, "filename": p.rsplit("/", 1)[-1], "url": self.file_url(p)}
@@ -224,7 +238,8 @@ class Session(AgentHost):
             await self.emit({"type": "sandboxUpdate", "sandboxId": self.session_id, "status": "running",
                              "mode": sandbox.mode, "vnc": sandbox.vnc, "screen": sandbox.info.get("screen")})
             await skills.install(sandbox)
-            agent = Agent(self, sandbox, self.messages)
+            profile = providers.resolve(self.model_selection)
+            agent = Agent(self, sandbox, self.messages, profile=profile)
             agent.repair_history()
             first_turn = not self.messages
             agent._append_user_blocks([{"type": "text", "text": text}])
@@ -238,10 +253,10 @@ class Session(AgentHost):
                 if catalog := skills.catalog(sandbox):
                     system_notes.append(catalog)
                 self.env_announced = True
-            if config.PLANNER_ENABLED:
+            if profile.planner:
                 await self.emit({"type": "liveStatus", "text": "Planning"})
                 context = "" if first_turn else "Current plan:\n" + render_plan(self.plan)
-                p = await llm.plan(text, context)
+                p = await llm.plan(text, context, profile)
                 if p and p.get("steps"):
                     if first_turn and p.get("title"):
                         self.title = p["title"]
@@ -281,7 +296,7 @@ class Session(AgentHost):
             return
         reply = next((e["content"] for e in reversed(self.events)
                       if e["type"] == "chat" and e["sender"] == "assistant"), "")
-        items = await llm.suggest(request, reply) if reply else []
+        items = await llm.suggest(request, reply, providers.resolve(self.model_selection)) if reply else []
         if items:
             action_id = f"suggest-{short_id()}"
             await self.emit({"type": "toolUsed", "tool": "suggestion", "name": "suggestion", "id": action_id,

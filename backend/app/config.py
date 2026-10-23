@@ -13,6 +13,10 @@ def _bool(name: str, default: bool) -> bool:
 LLM_BASE_URL = os.environ.get("MANUS_LLM_BASE_URL", "")
 LLM_API_KEY = os.environ.get("MANUS_LLM_API_KEY") or os.environ.get("LITELLM_API_KEY", "")
 MODEL = os.environ.get("MANUS_MODEL", "claude-opus-5-5")
+# Agent modes over the gateway (Manus' Max / 2.0 / Lite): model per mode, standard is MODEL.
+MODEL_MAX = os.environ.get("MANUS_MODEL_MAX") or MODEL
+MODEL_LITE = os.environ.get("MANUS_MODEL_LITE") or MODEL
+DEFAULT_MODE = os.environ.get("MANUS_DEFAULT_MODE", "standard")
 EFFORT = os.environ.get("MANUS_EFFORT", "high")
 SUBAGENT_EFFORT = os.environ.get("MANUS_SUBAGENT_EFFORT", "medium")
 MAX_TOKENS = int(os.environ.get("MANUS_MAX_TOKENS", "64000"))

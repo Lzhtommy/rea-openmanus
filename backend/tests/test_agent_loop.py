@@ -43,8 +43,10 @@ class ScriptedModel:
     def __init__(self, script):
         self.script = list(script)
         self.calls = []
+        self.profiles = []
 
-    async def __call__(self, messages, effort, on_delta=None, text_id="text"):
+    async def __call__(self, messages, effort, on_delta=None, text_id="text", profile=None):
+        self.profiles.append(profile)
         self.calls.append([m["role"] for m in messages])
         reply = await self._next(messages)
         if on_delta and reply is not None:  # simulate streaming of user-facing text
@@ -67,7 +69,7 @@ class ScriptedModel:
         return step(messages) if callable(step) else step
 
 
-async def fake_plan(request, context=""):
+async def fake_plan(request, context="", profile=None):
     return {"goal": "test goal", "title": "Test task", "steps": ["Explore", "Build", "Deliver"]}
 
 
@@ -75,7 +77,7 @@ async def fake_search(query, date_range="all", limit=10):
     return [{"title": "Example", "url": "https://example.com", "snippet": "snippet"}]
 
 
-async def fake_suggest(request, reply):
+async def fake_suggest(request, reply, profile=None):
     return ["深入分析第一点", "做成网站"]
 
 
@@ -357,6 +359,30 @@ async def test_schedule_tool_and_tick(store, monkeypatch):
     assert run.events[0]["content"] == "总结今天的科技新闻"
     after = scheduler_mod.scheduler.items[sched["id"]]
     assert after["runs"] == [run.session_id] and after["nextRunAt"] > sched["nextRunAt"]
+
+
+@pytest.mark.asyncio
+async def test_model_selection(store, monkeypatch):
+    """A task's mode/model selection is remembered and drives every model call of that task."""
+    from app import providers
+    model = ScriptedModel([msg(tool("idle")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    monkeypatch.setattr(config, "MODEL_LITE", "lite-model")
+    s = store.create()
+    s.select_model({"mode": "lite"})
+    s.select_model({"mode": "flex", "provider": "nope"})  # invalid: ignored
+    await s.user_message("hi", [])
+    await wait_status(s, {"idle"})
+    p = model.profiles[0]
+    assert p.model == "lite-model" and p.effort == "low" and not p.planner and p.provider == "litellm"
+    assert store.get(s.session_id).meta()["model"] == {"mode": "lite"}
+    providers.store.set("deepseek", "sk-test-key-123456", "", "deepseek-chat")
+    s.select_model({"mode": "flex", "provider": "deepseek", "model": "deepseek-reasoner"})
+    await s.user_message("again", [])
+    await wait_status(s, {"idle"})
+    p = model.profiles[-1]
+    assert (p.provider, p.model, p.base_url) == ("deepseek", "deepseek-reasoner", "https://api.deepseek.com/v1")
+    providers.store.delete("deepseek")
 
 
 def teardown_module():

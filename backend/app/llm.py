@@ -21,7 +21,8 @@ from typing import Any
 import openai
 from pydantic import BaseModel
 
-from . import config
+from . import config, providers
+from .providers import Profile
 from .prompts import PLANNER_PROMPT, PLANNER_SCHEMA, SUGGEST_PROMPT, SUGGEST_SCHEMA, SYSTEM_PROMPT
 from .tools import TOOLS
 
@@ -30,19 +31,29 @@ log = logging.getLogger("manus.llm")
 APIError = openai.OpenAIError  # any LLM failure, including a missing key
 BadRequestError = openai.BadRequestError
 
-_client: openai.AsyncOpenAI | None = None
+_clients: dict[tuple[str, str], openai.AsyncOpenAI] = {}
 
 
-def client() -> openai.AsyncOpenAI:
-    global _client
-    if _client is None:
-        if not config.LLM_BASE_URL:
-            raise openai.OpenAIError("MANUS_LLM_BASE_URL is not set")
-        if not config.LLM_API_KEY:
-            raise openai.OpenAIError("MANUS_LLM_API_KEY is not set")
-        _client = openai.AsyncOpenAI(api_key=config.LLM_API_KEY, base_url=config.LLM_BASE_URL, max_retries=4,
-                                     timeout=600)
-    return _client
+def client(p: Profile | None = None) -> openai.AsyncOpenAI:
+    """One client per (endpoint, key): the gateway and every Flex provider."""
+    p = p or providers.resolve(None)
+    if not p.base_url:
+        raise openai.OpenAIError("MANUS_LLM_BASE_URL is not set" if p.provider == "litellm" else f"{p.provider}: base URL is not set")
+    if not p.api_key:
+        raise openai.OpenAIError("MANUS_LLM_API_KEY is not set" if p.provider == "litellm" else f"{p.provider}: API key is not set")
+    key = (p.base_url, p.api_key)
+    if key not in _clients:
+        _clients[key] = openai.AsyncOpenAI(api_key=p.api_key, base_url=p.base_url, max_retries=4, timeout=600)
+    return _clients[key]
+
+
+async def list_models(base_url: str, api_key: str) -> list[str]:
+    """Model ids an endpoint offers (also serves as the connection test for Flex providers)."""
+    c = openai.AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=1, timeout=20)
+    try:
+        return sorted(m.id for m in (await c.models.list()).data)
+    finally:
+        await c.close()
 
 
 # ------------------------------------------------------------------ reply ---
@@ -200,7 +211,7 @@ def _tool_result(block: dict) -> tuple[str, list[dict]]:
     return text, images
 
 
-def _to_chat(messages: list[dict]) -> list[dict]:
+def _to_chat(messages: list[dict], replay_thinking: bool = True) -> list[dict]:
     out: list[dict] = []
     for m in messages:
         role, content = m["role"], m["content"]
@@ -229,7 +240,7 @@ def _to_chat(messages: list[dict]) -> list[dict]:
                 msg["tool_calls"] = calls
             signed = [{"type": "thinking", "thinking": b["thinking"], "signature": b["signature"]}
                       for b in content if b.get("type") == "thinking" and b.get("signature")]
-            if signed:
+            if signed and replay_thinking:
                 msg["thinking_blocks"] = signed
             out.append(msg)
             continue
@@ -261,65 +272,73 @@ def _cache_tail(chat: list[dict]) -> None:
             return
 
 
-def _system(text: str) -> dict:
-    part = {"type": "text", "text": text}
-    if config.PROMPT_CACHE:
-        part["cache_control"] = {"type": "ephemeral"}
-    return {"role": "system", "content": [part]}
+def _system(text: str, p: Profile) -> dict:
+    if not _caching(p):
+        return {"role": "system", "content": text}
+    return {"role": "system", "content": [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]}
+
+
+def _caching(p: Profile) -> bool:
+    return config.PROMPT_CACHE and p.supports("cache_control")
 
 
 CHAT_TOOLS = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
                                                 "parameters": t["input_schema"]}} for t in TOOLS]
 
 
-def _common(effort: str | None) -> dict:
-    kw: dict[str, Any] = {"model": config.MODEL, "extra_body": {"drop_params": True}}
-    if effort and config.REASONING:
+def _common(p: Profile, effort: str | None) -> dict:
+    """Model and provider-specific extras: gateway-only params never reach strict APIs."""
+    kw: dict[str, Any] = {"model": p.model}
+    if p.supports("drop_params"):
+        kw["extra_body"] = {"drop_params": True}
+    if effort and config.REASONING and p.supports("reasoning"):
         kw["reasoning_effort"] = effort
     return kw
 
 
 async def agent_step(messages: list[dict], effort: str, on_delta: Delta | None = None,
-                     text_id: str = "text") -> Reply:
+                     text_id: str = "text", profile: Profile | None = None) -> Reply:
     """One agent-loop iteration: the model selects the next tool call(s).
 
     With on_delta, the reply is streamed and user-facing text is reported as it arrives
     (stream id = the message tool call's id, or text_id for a plain-text answer).
     """
-    chat = [_system(SYSTEM_PROMPT)] + _to_chat(messages)
-    if config.PROMPT_CACHE:
+    p = profile or providers.resolve(None)
+    chat = [_system(SYSTEM_PROMPT, p)] + _to_chat(messages, replay_thinking=p.supports("thinking_blocks"))
+    if _caching(p):
         _cache_tail(chat)
-    kw = dict(messages=chat, tools=CHAT_TOOLS, tool_choice="auto", max_tokens=config.MAX_TOKENS, **_common(effort))
+    kw = dict(messages=chat, tools=CHAT_TOOLS, tool_choice="auto", max_tokens=config.MAX_TOKENS, **_common(p, effort))
     if on_delta is None:
-        return _reply(await client().chat.completions.create(**kw))
-    stream = await client().chat.completions.create(**kw, stream=True)
+        return _reply(await client(p).chat.completions.create(**kw))
+    stream = await client(p).chat.completions.create(**kw, stream=True)
     return await _accumulate(stream, on_delta, text_id)
 
 
-_json_schema_ok = True  # flips off once the gateway model rejects json_schema (e.g. DeepSeek)
+_no_json_schema: set[tuple[str, str]] = set()  # (provider, model) that reject json_schema output (e.g. DeepSeek)
 
 
-async def _structured(name: str, system: str, schema: dict, content: str) -> dict | None:
+async def _structured(name: str, system: str, schema: dict, content: str, profile: Profile | None = None) -> dict | None:
     """A small side call with JSON output; None on any failure.
 
     Uses response_format json_schema where supported, else json_object with the schema in the prompt.
     """
-    global _json_schema_ok
+    p = profile or providers.resolve(None)
+    ident = (p.provider, p.model)
     prompt = system + "\nReply with a single JSON object only, matching this JSON schema:\n" + json.dumps(schema)
-    messages = [_system(prompt), {"role": "user", "content": content}]
+    messages = [_system(prompt, p), {"role": "user", "content": content}]
     try:
         try:
-            fmt = ({"type": "json_schema", "json_schema": {"name": name, "schema": schema, "strict": True}}
-                   if _json_schema_ok else {"type": "json_object"})
-            resp = await client().chat.completions.create(
-                messages=messages, response_format=fmt, max_tokens=4000, **_common("low"))
+            fmt = ({"type": "json_object"} if ident in _no_json_schema
+                   else {"type": "json_schema", "json_schema": {"name": name, "schema": schema, "strict": True}})
+            resp = await client(p).chat.completions.create(
+                messages=messages, response_format=fmt, max_tokens=4000, **_common(p, "low"))
         except openai.BadRequestError as e:
-            if not _json_schema_ok or "response_format" not in str(e):
+            if ident in _no_json_schema or "response_format" not in str(e):
                 raise
-            _json_schema_ok = False
-            log.info("model rejects json_schema output; using json_object")
-            resp = await client().chat.completions.create(
-                messages=messages, response_format={"type": "json_object"}, max_tokens=4000, **_common("low"))
+            _no_json_schema.add(ident)
+            log.info("%s/%s rejects json_schema output; using json_object", *ident)
+            resp = await client(p).chat.completions.create(
+                messages=messages, response_format={"type": "json_object"}, max_tokens=4000, **_common(p, "low"))
     except openai.OpenAIError as e:
         log.warning("%s failed: %s", name, e)
         return None
@@ -333,15 +352,15 @@ async def _structured(name: str, system: str, schema: dict, content: str) -> dic
         return None
 
 
-async def plan(request: str, context: str = "") -> dict | None:
+async def plan(request: str, context: str = "", profile: Profile | None = None) -> dict | None:
     """Planner module: a separate call that turns the request into a step list."""
     content = (f"<previous_context>\n{context}\n</previous_context>\n\n" if context else "") + \
               f"<user_request>\n{request}\n</user_request>"
-    return await _structured("planner", PLANNER_PROMPT, PLANNER_SCHEMA, content)
+    return await _structured("planner", PLANNER_PROMPT, PLANNER_SCHEMA, content, profile)
 
 
-async def suggest(request: str, reply: str) -> list[str]:
+async def suggest(request: str, reply: str, profile: Profile | None = None) -> list[str]:
     """Follow-up requests offered after a task finishes."""
     r = await _structured("suggest", SUGGEST_PROMPT, SUGGEST_SCHEMA,
-                          f"<user_request>\n{request}\n</user_request>\n\n<agent_reply>\n{reply[:6000]}\n</agent_reply>")
+                          f"<user_request>\n{request}\n</user_request>\n\n<agent_reply>\n{reply[:6000]}\n</agent_reply>", profile)
     return [x for x in (r or {}).get("suggestions", []) if isinstance(x, str) and x.strip()][:3]

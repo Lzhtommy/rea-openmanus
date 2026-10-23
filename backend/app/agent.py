@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from . import config, llm
+from . import config, llm, providers
 from .prompts import SUBAGENT_BRIEF
 from .sandbox import Sandbox, SandboxError
 from .search import search_web
@@ -68,9 +68,11 @@ class AgentHost:
 
 class Agent:
     def __init__(self, host: AgentHost, sandbox: Sandbox, messages: list[dict], role: str = "main",
-                 effort: str = config.EFFORT, on_progress: Callable[[str], None] | None = None):
+                 profile: providers.Profile | None = None, on_progress: Callable[[str], None] | None = None):
         self.host = host
         self.sandbox = sandbox
+        self.profile = profile or providers.resolve(None)
+        effort = self.profile.effort if role == "main" else self.profile.subagent_effort
         self.messages = messages
         self.role = role
         self.effort = effort
@@ -91,7 +93,7 @@ class Agent:
             text_id = f"txt-{short_id()}"
             try:
                 resp = await llm.agent_step(self.messages, self.effort, on_delta=self._on_delta if self.role == "main" else None,
-                                            text_id=text_id)
+                                            text_id=text_id, profile=self.profile)
             except llm.BadRequestError as e:
                 await self._error(f"LLM request rejected: {e.message}")
                 return
@@ -439,7 +441,7 @@ class Agent:
                     asyncio.get_event_loop().create_task(push())
 
                 sub = Agent(self.host, self.sandbox, [{"role": "user", "content": brief}], role="subagent",
-                            effort=config.SUBAGENT_EFFORT, on_progress=progress)
+                            profile=self.profile, on_progress=progress)
                 try:
                     await sub.run()
                     d["result"] = sub.result or "(no result)"

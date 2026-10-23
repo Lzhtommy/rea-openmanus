@@ -52,6 +52,7 @@ const ICONS = {
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/>',
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   play2: '<path d="M6 4l14 8-14 8z"/>',
+  flex: '<circle cx="9" cy="14" r="5.5"/><circle cx="15" cy="10" r="5.5"/>',
   library: '<path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"/>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   paperclip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 0 1 5.7 5.7l-8.6 8.6a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
@@ -101,6 +102,7 @@ const zh = (a) => ACTION_ZH[a] || a || "";
 
 // ------------------------------------------------------------------ state ---
 const S = {
+  models: { modes: [], providers: [], gatewayModels: [] }, modelSel: null, modeMenu: false,
   view: "home", library: [], libFilter: "all", libQuery: "", schedules: [], editing: null,
   sessions: [], cfg: {}, current: null, ws: null, lastSeq: {}, replaying: false, filter: "",
   title: "", status: "idle", live: "", plan: [], planOpen: false,
@@ -133,6 +135,7 @@ function handle(msg) {
     if (msg.session.id !== S.current) return;
     S.replaying = false;
     S.title = msg.session.title; S.status = msg.session.status;
+    if (msg.session.model?.mode) S.modelSel = msg.session.model; // the task keeps its own mode/model
     if (msg.session.plan?.length) S.plan = msg.session.plan;
     scheduleRender(true);
     return;
@@ -238,6 +241,7 @@ function renderAll() {
   (home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
   const title = auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
+  renderModeButton();
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
   ["#share-btn", "#delete-btn"].forEach((s) => $(s).classList.toggle("hidden", home || lib));
   $("#panel-btn").classList.toggle("hidden", home || lib || !S.steps.length || S.panel.open);
@@ -287,7 +291,7 @@ function renderTurn(t) {
   if (t.user) h += userHtml(t.user.ev ?? t.user);
   const hasAssistant = t.items.length || running;
   if (hasAssistant) {
-    h += `<div class="assistant"><div class="a-head"><span class="brand-mark">${icon("logo")}</span><span class="brand-word">openmanus</span>${S.cfg.model ? `<span class="badge">${esc(shortModel(S.cfg.model))}</span>` : ""}</div>`;
+    h += `<div class="assistant"><div class="a-head"><span class="brand-mark">${icon("logo")}</span><span class="brand-word">openmanus</span><span class="badge">${esc(modelBadge())}</span></div>`;
     if (logItems.length || running) {
       const dur = fmtDur((t.end || Date.now()) - (t.start || Date.now()));
       h += `<button class="worked" data-act="toggle-log" data-turn="${t.id}">${running ? `<span class="spin">${icon("loader")}</span>工作中 · ${dur}` : `工作了 ${dur}`}${icon(open ? "chevDown" : "chevRight")}</button>`;
@@ -627,6 +631,93 @@ function toggleTakeover() {
   refreshSel();
 }
 
+// ------------------------------------------------------------------ modes & Flex (Manus' mode selector) ---
+// Max / standard / Lite run on the gateway; Flex runs on any configured provider with your own key.
+const defaultSel = () => ({ mode: S.models.default || "standard" });
+function currentSel() { return S.modelSel || defaultSel(); }
+function selLabel(sel = currentSel()) {
+  if (sel.mode === "flex") return `Flex · ${shortModel(sel.model || providerInfo(sel.provider)?.model || "")}`;
+  return S.models.modes.find((m) => m.id === sel.mode)?.label || "OpenManus";
+}
+function modelBadge(sel = currentSel()) {
+  if (sel.mode === "flex") return shortModel(sel.model || providerInfo(sel.provider)?.model || "");
+  return shortModel(S.models.modes.find((m) => m.id === sel.mode)?.model || S.cfg.model || "");
+}
+const providerInfo = (id) => (id === "litellm" ? { id, label: "LiteLLM 网关", configured: true, model: S.cfg.model } : S.models.providers.find((p) => p.id === id));
+
+async function loadModels() {
+  try { S.models = await (await fetch("/api/models")).json(); } catch { /* keep defaults */ }
+  if (!S.current) { try { const saved = JSON.parse(store.get("model-sel", "null")); if (saved?.mode) S.modelSel = saved; } catch { /* ignore */ } }
+  renderModeButton();
+}
+
+function renderModeButton() {
+  $("#mode-label").textContent = selLabel();
+  const menu = $("#mode-menu");
+  menu.classList.toggle("hidden", !S.modeMenu);
+  if (!S.modeMenu) return;
+  const cur = currentSel();
+  menu.innerHTML = S.models.modes.map((m) => {
+    const on = cur.mode === m.id;
+    const sub = m.id === "flex" && cur.mode === "flex" ? `${providerInfo(cur.provider)?.label || ""} · ${cur.model || ""}` : m.description;
+    return `<div class="mode-item ${on ? "on" : ""}" data-mode="${esc(m.id)}"><div class="mode-text"><div class="mode-name">${esc(m.label)}${m.badge ? `<span class="badge">${esc(m.badge)}</span>` : ""}</div>` +
+      `<div class="mode-desc">${esc(sub)}</div>${m.model && m.id !== "flex" ? `<div class="mode-model">${esc(shortModel(m.model))}</div>` : ""}</div>` +
+      (m.id === "flex" ? `<button class="mode-set" data-flex-settings="1">设置</button>` : "") + (on ? icon("check") : "") + `</div>`;
+  }).join("");
+}
+
+function setSel(sel) {
+  S.modelSel = sel;
+  if (!S.current) store.set("model-sel", JSON.stringify(sel));
+  S.modeMenu = false;
+  renderModeButton();
+  S.turns.forEach((t) => S.dirty.add(t)); scheduleRender();
+}
+
+function openFlex() {
+  S.modeMenu = false; renderModeButton();
+  const f = $("#flex-form");
+  const opts = [["litellm", "LiteLLM 网关（已配置）"], ...S.models.providers.map((p) => [p.id, p.label + (p.configured ? " ✓" : "")])];
+  $("#flex-provider").innerHTML = opts.map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join("");
+  const cur = currentSel();
+  f.provider.value = cur.mode === "flex" && cur.provider ? cur.provider : (S.models.providers.find((p) => p.configured)?.id || "litellm");
+  syncFlex(cur.mode === "flex" ? cur.model : "");
+  $("#flex-modal").classList.remove("hidden");
+}
+async function syncFlex(model = "") {
+  const f = $("#flex-form"), pid = f.provider.value, p = providerInfo(pid);
+  const gw = pid === "litellm";
+  $("#flex-key-row").classList.toggle("hidden", gw);
+  $("#flex-base-row").classList.toggle("hidden", gw || !["custom", "fireworks", "openrouter"].includes(pid) && !!p?.baseUrl);
+  f.apiKey.value = ""; f.apiKey.placeholder = p?.keyHint ? `已保存（${p.keyHint}），留空则沿用` : "sk-...";
+  f.baseUrl.value = p?.baseUrl || "";
+  f.model.value = model || p?.model || "";
+  $("#flex-err").textContent = "";
+  $("#flex-remove").classList.toggle("hidden", gw || !p?.configured);
+  $("#flex-connect").textContent = gw || p?.configured ? "使用" : "连接";
+  let list = gw ? S.models.gatewayModels : [];
+  if (!gw && p?.configured) { try { const r = await fetch(`/api/providers/${pid}/models`); if (r.ok) list = await r.json(); } catch { /* offline */ } }
+  $("#flex-models").innerHTML = list.map((m) => `<option value="${esc(m)}"></option>`).join("");
+}
+async function saveFlex(e) {
+  e.preventDefault();
+  const f = e.target, pid = f.provider.value, btn = $("#flex-connect");
+  $("#flex-err").textContent = "";
+  if (pid !== "litellm" && (f.apiKey.value || f.baseUrl.value !== (providerInfo(pid)?.baseUrl || "") || !providerInfo(pid)?.configured)) {
+    btn.disabled = true; btn.textContent = "连接中…";
+    const r = await fetch(`/api/providers/${pid}`, { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: f.apiKey.value, baseUrl: f.baseUrl.value, model: f.model.value }) });
+    btn.disabled = false; btn.textContent = "连接";
+    if (!r.ok) { $("#flex-err").textContent = (await r.json().catch(() => ({}))).detail || "连接失败"; return; }
+    const info = await r.json();
+    if (!f.model.value) f.model.value = info.model;
+    await loadModels();
+  }
+  if (!f.model.value.trim()) { $("#flex-err").textContent = "请选择或填写模型"; return; }
+  $("#flex-modal").classList.add("hidden");
+  setSel({ mode: "flex", provider: pid, model: f.model.value.trim() });
+}
+
 // ------------------------------------------------------------------ sessions / nav ---
 async function refreshSessions() {
   try { S.sessions = await (await fetch("/api/sessions")).json(); } catch { return; }
@@ -784,6 +875,7 @@ async function schedAction(a, id) {
 
 function openSession(sid) {
   S.view = sid ? "session" : "home";
+  try { S.modelSel = sid ? null : JSON.parse(store.get("model-sel", "null")); } catch { S.modelSel = null; }
   if (S.current && S.current !== sid) send({ type: "leave_session", sessionId: S.current });
   S.current = sid; S.lastSeq[sid] = -1;
   history.replaceState(null, "", sid ? `#${sid}` : "#");
@@ -807,9 +899,11 @@ async function submit(text) {
   text = text.trim();
   if (!text && S.status === "running") { send({ type: "stop_session", sessionId: S.current }); return; }
   if (!text) return;
+  const sel = currentSel(); // creating the session resets the view, keep the chosen mode
   const sid = await ensureSession();
+  S.modelSel = sel;
   await new Promise((r) => setTimeout(r, 60));
-  send({ type: "user_message", sessionId: sid, content: text, attachments: S.attachments.map((a) => a.path) });
+  send({ type: "user_message", sessionId: sid, content: text, attachments: S.attachments.map((a) => a.path), model: sel });
   S.attachments = []; renderAttachments();
   $("#input").value = ""; autoGrow(); stickBottom = true;
   renderComposerState();
@@ -846,6 +940,29 @@ function bind() {
   const newTask = () => goHome();
   $("#new-task").onclick = newTask; $("#new-task-2").onclick = newTask;
   $("#nav-library").onclick = openLibrary;
+  $("#mode-btn").onclick = (e) => { e.stopPropagation(); S.modeMenu = !S.modeMenu; renderModeButton(); };
+  $("#mode-menu").onclick = (e) => {
+    e.stopPropagation();
+    if (e.target.closest("[data-flex-settings]")) return openFlex();
+    const it = e.target.closest("[data-mode]");
+    if (!it) return;
+    if (it.dataset.mode !== "flex") return setSel({ mode: it.dataset.mode });
+    const cur = currentSel();
+    if (cur.mode === "flex") return (S.modeMenu = false, renderModeButton());
+    const p = S.models.providers.find((x) => x.configured);
+    if (p) setSel({ mode: "flex", provider: p.id, model: p.model }); else openFlex();
+  };
+  document.addEventListener("click", () => { if (S.modeMenu) { S.modeMenu = false; renderModeButton(); } });
+  $("#flex-form").onsubmit = saveFlex;
+  $("#flex-provider").onchange = () => syncFlex();
+  $("#flex-close").onclick = $("#flex-cancel").onclick = () => $("#flex-modal").classList.add("hidden");
+  $("#flex-remove").onclick = async () => {
+    const pid = $("#flex-form").provider.value;
+    if (!confirm("移除该提供商的密钥？")) return;
+    await fetch(`/api/providers/${pid}`, { method: "DELETE" });
+    await loadModels(); syncFlex();
+    if (currentSel().provider === pid) setSel(defaultSel());
+  };
   $("#nav-auto").onclick = openAutomations;
   $("#auto-new").onclick = () => openSchedForm(null);
   $("#auto-list").onclick = (e) => {
@@ -955,6 +1072,7 @@ async function deleteSession(sid) {
   connect();
   try {
     S.cfg = await (await fetch("/api/config")).json();
+    await loadModels();
     $("#config-info").textContent = `${shortModel(S.cfg.model)} · ${S.cfg.sandbox} 沙箱`;
   } catch { /* backend not reachable yet */ }
   await refreshSessions();

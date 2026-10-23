@@ -39,7 +39,8 @@
         <div class="head-left">
           <button class="icon-btn only-collapsed" id="nav-expand" title="展开侧边栏" data-icon="panelLeft"></button>
           <button class="icon-btn only-collapsed" id="new-task-2" title="新建任务" data-icon="newTask"></button>
-          <div id="session-title" class="session-title">OpenManus</div>
+          <div class="mode-wrap"><button class="mode-btn" id="mode-btn"><span id="mode-label">OpenManus</span><span data-icon="chevDown"></span></button><div class="mode-menu hidden" id="mode-menu"></div></div>
+          <div id="session-title" class="session-title hidden"></div>
         </div>
         <div class="head-right">
           <button class="icon-btn hidden" id="share-btn" title="复制链接" data-icon="share"></button>
@@ -134,6 +135,21 @@
         <div class="sched-err" id="sched-err"></div>
       </div>
       <div class="cc-actions"><button type="button" class="btn ghost" id="sched-cancel">取消</button><button type="submit" class="btn primary">保存</button></div>
+    </form>
+  </div>
+
+  <div id="flex-modal" class="hidden">
+    <form class="flex-card" id="flex-form" autocomplete="off">
+      <button type="button" class="icon-btn flex-x" id="flex-close" data-icon="x"></button>
+      <div class="flex-logo" data-icon="flex"></div>
+      <div class="flex-title">OpenManus Flex <span class="badge">Beta</span></div>
+      <div class="flex-desc">使用你自己的 API 密钥和模型运行 OpenManus。第三方模型的性能可能有所不同。</div>
+      <label>提供商<select name="provider" id="flex-provider"></select></label>
+      <label id="flex-key-row">API 密钥<input name="apiKey" type="password" placeholder="sk-..." /></label>
+      <label id="flex-base-row">Base URL<input name="baseUrl" placeholder="https://..." /></label>
+      <label>模型<input name="model" list="flex-models" placeholder="连接后从列表中选择，或直接填写" /><datalist id="flex-models"></datalist></label>
+      <div class="sched-err" id="flex-err"></div>
+      <div class="flex-actions"><button type="button" class="btn ghost" id="flex-remove">移除</button><span class="spacer"></span><button type="button" class="btn ghost" id="flex-cancel">取消</button><button type="submit" class="btn primary" id="flex-connect">连接</button></div>
     </form>
   </div>
 

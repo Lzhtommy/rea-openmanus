@@ -83,3 +83,23 @@ def test_stream_accumulate():
     assert r.content[0].thinking == "hmm" and r.content[0].signature == "sig"
     assert r.content[1].input == {"text": "你好，世界", "kind": "result"}
     assert seen[-1] == ("call_1", "你好，世界") and len(seen) > 1 and all(s == "call_1" for s, _ in seen)
+
+
+def test_provider_extras_and_keys(tmp_path, monkeypatch):
+    """Gateway-only params are sent to LiteLLM only; stored keys are masked and the file is private."""
+    import os, stat
+    from app import config, providers
+    gw = providers.resolve({"mode": "max"})
+    kw = llm._common(gw, "high")
+    assert kw["extra_body"] == {"drop_params": True} and kw.get("reasoning_effort") == "high" or not config.REASONING
+    monkeypatch.setattr(providers.store, "path", tmp_path / "providers.json")
+    providers.store.set("openai", "sk-abcdefghijklmnop", "", "gpt-5.1")
+    oa = providers.resolve({"mode": "flex", "provider": "openai"})
+    kw = llm._common(oa, "high")
+    assert "extra_body" not in kw and kw["model"] == "gpt-5.1"
+    ds = providers.store.set("deepseek", "sk-1234567890abcd", "", "")
+    assert llm._common(providers.resolve({"mode": "flex", "provider": "deepseek"}), "high") == {"model": "deepseek-chat"}
+    assert ds["keyHint"] == "sk-…abcd" and "1234567890" not in str(providers.store.catalog())
+    assert stat.S_IMODE(os.stat(providers.store.path).st_mode) == 0o600
+    sys_msg = llm._system("x", oa)
+    assert sys_msg == {"role": "system", "content": "x"}  # no cache_control for strict APIs

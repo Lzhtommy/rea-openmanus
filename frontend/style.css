@@ -369,6 +369,34 @@ body.pc-full #main { display: none; }
 .err-view { padding: 16px; }
 .err-view .term { color: var(--error); background: var(--error-tsp); border-radius: 8px; }
 
+/* ------------------------------------------------------------------ mode selector & Flex */
+.mode-wrap { position: relative; }
+.mode-btn { display: flex; align-items: center; gap: 4px; height: 32px; padding: 7px 6px 7px 8px; border-radius: 8px; font-size: 16px; line-height: 22px; font-weight: 500; }
+.mode-btn:hover { background: var(--fill-hover); }
+.mode-btn svg.i { width: 16px; height: 16px; color: var(--text-tertiary); }
+.mode-menu { position: absolute; top: 38px; left: 0; z-index: 30; width: 366px; padding: 6px; background: var(--bg-white); border: 1px solid var(--border-main); border-radius: 16px; box-shadow: 0 12px 40px var(--shadow-m); }
+.mode-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
+.mode-item:hover { background: var(--fill-light); }
+.mode-text { flex: 1; min-width: 0; }
+.mode-name { font-size: 14px; line-height: 20px; display: flex; align-items: center; gap: 6px; }
+.mode-name .badge { font: 600 11px/14px var(--font-serif); }
+.mode-desc { font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+.mode-model { font-size: 11px; color: var(--text-quaternary); font-family: var(--font-mono); margin-top: 1px; }
+.mode-item svg.i { width: 16px; height: 16px; flex: none; }
+.mode-set { font-size: 13px; color: var(--text-blue); padding: 2px 6px; border-radius: 6px; opacity: 0; }
+.mode-item:hover .mode-set { opacity: 1; }
+#flex-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.flex-card { position: relative; width: min(480px, 100%); background: var(--bg-white); border-radius: 20px; box-shadow: 0 24px 64px var(--shadow-l); padding: 28px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+.flex-x { position: absolute; top: 14px; right: 14px; }
+.flex-logo { width: 64px; height: 64px; margin: 8px auto 0; border-radius: 14px; border: 1px solid var(--border-main); display: flex; align-items: center; justify-content: center; }
+.flex-logo svg.i { width: 34px; height: 34px; stroke-width: 2; }
+.flex-title { text-align: center; font-size: 20px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.flex-desc { text-align: center; font-size: 14px; color: var(--text-secondary); margin-bottom: 8px; }
+.flex-card label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; }
+.flex-card input, .flex-card select { font-size: 14px; font-weight: 400; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border-dark); background: var(--bg-card); color: var(--text-primary); outline: none; }
+.flex-card input:focus, .flex-card select:focus { border-color: var(--border-input-active); }
+.flex-actions { display: flex; gap: 8px; margin-top: 4px; }
+
 /* ------------------------------------------------------------------ library */
 .nav-item.active { background: var(--fill-hover); }
 #library { flex: 1; min-height: 0; overflow-y: auto; }
