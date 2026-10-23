@@ -711,3 +711,7 @@ textarea.code-edit { font: 13px/20px var(--font-mono); min-height: 52vh; }
 .ag-av { width: 36px; height: 36px; border-radius: 50%; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; font-size: 16px; flex: none; border: 2px solid var(--bg-white); }
 .ag-stack { display: inline-flex; } .ag-stack .ag-av { margin-left: -10px; } .ag-stack .ag-av:first-child { margin-left: 0; }
 .dg-head { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+
+.plan-edit { width: 100%; margin-top: 8px; font: 13px/22px var(--font); padding: 8px 10px; border: 1px solid var(--border-dark); border-radius: 8px; background: var(--bg-white); color: var(--text-primary); resize: vertical; }
+.queued-tag { display: flex; justify-content: flex-end; align-items: center; gap: 4px; font-size: 12px; color: var(--text-tertiary); margin-bottom: 4px; } .queued-tag svg.i { width: 12px; height: 12px; }
+#opt-confirm-plan { margin: 0; }

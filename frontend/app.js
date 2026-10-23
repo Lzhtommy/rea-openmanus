@@ -195,12 +195,14 @@ function newTurn(user, ts) {
   S.turns.push(t);
   return t;
 }
-const ensureTurn = (ts) => lastTurn() || newTurn(null, ts);
+// The turn events belong to: a queued request's turn waits until the current run finishes.
+const activeTurn = () => { const t = lastTurn(); return t?.status === "queued" ? ([...S.turns].reverse().find((x) => x.status !== "queued") || t) : t; };
+const ensureTurn = (ts) => activeTurn() || newTurn(null, ts);
 
 function apply(ev) {
   switch (ev.type) {
     case "chat": {
-      if (ev.sender === "user") { S.dirty.add(newTurn(ev, ev.timestamp)); break; }
+      if (ev.sender === "user") { const nt = newTurn(ev, ev.timestamp); if (ev.queued) nt.status = "queued"; S.dirty.add(nt); break; }
       const t = ensureTurn(ev.timestamp);
       // the finished message replaces its streaming draft in place
       const si = ev.streamId ? t.items.findIndex((it) => it.kind === "stream" && it.id === ev.streamId) : -1;
@@ -238,7 +240,9 @@ function apply(ev) {
     }
     case "statusUpdate": {
       S.status = ev.agentStatus;
-      const t = lastTurn();
+      let t = activeTurn();
+      const waitingTurn = S.turns.find((x) => x.status === "queued");
+      if (ev.agentStatus === "running" && waitingTurn && t && isFinished(t)) t = waitingTurn;  // the queued request starts
       if (t) {
         if (ev.agentStatus === "running") { t.status = "running"; t.end = null; }
         else { t.status = ev.agentStatus; t.end = ev.timestamp; if (ev.agentStatus === "error") t.error = ev.description || ""; }
@@ -248,8 +252,10 @@ function apply(ev) {
       if (!S.replaying) refreshSessions();
       break;
     }
-    case "liveStatus": S.live = ev.text || ""; if (lastTurn()) S.dirty.add(lastTurn()); break;
+    case "liveStatus": S.live = ev.text || ""; if (activeTurn()) S.dirty.add(activeTurn()); break;
     case "planUpdate": S.plan = ev.tasks || []; break;
+    case "planConfirm": { const t = ensureTurn(ev.timestamp); t.planConfirm = ev.tasks || []; S.dirty.add(t); break; }
+    case "planConfirmed": { const t = lastTurn(); if (t) { t.planConfirm = null; S.dirty.add(t); } break; }
     case "title": S.title = ev.title; refreshSessions(); break;
     case "sandboxUpdate": S.vnc = !!ev.vnc && !S.readonly; S.vncFailed = false; break;
     default: return; // explanation: not shown (Manus doesn't render it)
@@ -333,7 +339,7 @@ function renderAll() {
 // Steps held for the user's approval (Manus' need_confirm). While one is pending the turn is still in
 // progress even though the agent status is "waiting".
 const pendingConfirms = (t) => S.steps.filter((s) => s.turn === t && s.status === "need_confirm");
-const isFinished = (t) => t.status !== "running" && !(t.status === "waiting" && pendingConfirms(t).length);
+const isFinished = (t) => t.status !== "running" && !(t.status === "waiting" && (pendingConfirms(t).length || t.planConfirm));
 
 // Index where the turn's result starts: the last chat marked deliveryKind "result", else the run of
 // chat messages after the last step group. Everything before it lives in the collapsible work log.
@@ -370,6 +376,9 @@ function renderTurn(t) {
     }
     if (running && isLast && S.status !== "waiting") h += liveLineHtml(t);
     h += pendingConfirms(t).map(confirmHtml).join("");
+    if (t.planConfirm && !S.readonly) h += `<div class="confirm-card"><div class="cc-head">${icon("list")}请确认执行计划</div><div class="cc-body"><div class="cc-reason">可以直接修改，每行一个步骤<span>确认后 OpenManus 按这个计划开始工作</span></div>` +
+      `<textarea class="plan-edit" id="plan-edit-${t.id}" rows="${Math.min(10, t.planConfirm.length + 1)}">${esc(t.planConfirm.map((x) => x.title).join("\n"))}</textarea></div>` +
+      `<div class="cc-actions"><button class="btn ghost" data-act="plan-confirm" data-turn="${t.id}" data-ok="0">取消任务</button><button class="btn primary" data-act="plan-confirm" data-turn="${t.id}" data-ok="1">开始执行</button></div></div>`;
     h += S.steps.filter((s) => s.turn === t && s.detail?.knowledge && s.status === "success").map((s) => knowCardHtml(s.detail.knowledge)).join("");
     if (finalItems.length) h += `<div class="final">${finalItems.map((it) => (it.kind === "chat" ? chatHtml(it.ev, true) : itemHtml(t, it, false))).join("")}</div>`;
     if (isFinished(t)) h += doneRowHtml(t, fi);
@@ -390,7 +399,8 @@ function userHtml(ev) {
   const sks = (ev.skills || []).map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span></span>`).join("");
   const te = ev.triggerEvent;
   const evHtml = te ? `<details class="trig-ev"><summary>${icon(SRC_ICO[te.source] || "zap")}${esc({ webhook: "收到 Webhook 事件", condition: "触发条件已满足", manual: "试运行" }[te.source] || "触发事件")}</summary><pre>${esc(te.text.replace(/^<trigger_event[^>]*>\n?|\n?<\/trigger_event>[\s\S]*$/g, ""))}</pre></details>` : "";
-  return `<div class="msg-user"><div>${evHtml}<div class="bubble">${esc(ev.content)}</div>${files || sks ? `<div class="files">${sks}${files}</div>` : ""}</div></div>`;
+  const queued = ev.queued && S.turns.find((t) => t.user === ev)?.status === "queued" ? `<div class="queued-tag">${icon("clock")}排队中，当前任务完成后执行</div>` : "";
+  return `<div class="msg-user"><div>${evHtml}${queued}<div class="bubble">${esc(ev.content)}</div>${files || sks ? `<div class="files">${sks}${files}</div>` : ""}</div></div>`;
 }
 
 function itemHtml(t, it, isCurrent) {
@@ -411,6 +421,7 @@ function chatHtml(ev, isFinal) {
 
 function stepText(s) {
   if (s.brief) return esc(s.brief);
+  if (s.status === "streaming") return `${esc(zh(s.message?.action))}…`;
   const act = zh(s.message?.action), param = s.message?.param || "";
   if (s.tool === "text_editor" && param) return `${esc(act)} <b>${esc(basename(param))}</b>`;
   return `${esc(act)}${param ? ` <b>${esc(param.length > 90 ? param.slice(0, 90) + "…" : param)}</b>` : ""}`;
@@ -418,7 +429,7 @@ function stepText(s) {
 
 function stepHtml(s) {
   const meta = TOOL[s.tool] || { icon: "list" };
-  const running = s.status === "start" || s.status === "running";
+  const running = s.status === "start" || s.status === "running" || s.status === "streaming";
   if (s.status === "need_confirm") return `<button class="step hold" data-act="step" data-id="${esc(s.actionId)}"><span class="step-ico">${icon("alert")}</span><span class="step-text">${stepText(s)}<em>等待确认</em></span></button>`;
   const editFile = s.tool === "text_editor" && /write|str_replace/.test(s.name || "");
   const ico = editFile ? `<span class="step-ico file">${icon("fileDoc")}</span>` : `<span class="step-ico ${meta.round ? "round" : ""}">${icon(meta.icon)}</span>`;
@@ -572,7 +583,7 @@ function renderTaskbar() {
   if (S.status === "running") {
     const txt = last && (last.status === "start" || last.status === "running") ? (last.brief || `${zh(last.message?.action)} ${last.message?.param || ""}`) : liveText(S.live);
     text = `<span class="tb-text"><span class="shimmer">${esc(txt)}</span></span>`;
-  } else if (S.status === "waiting") text = t && pendingConfirms(t).length ? `<span class="tb-text warn">${icon("alert")}等待你确认操作</span>` : `<span class="tb-text">${icon("hand")}等待你的回复</span>`;
+  } else if (S.status === "waiting") text = t && activeTurn()?.planConfirm ? `<span class="tb-text warn">${icon("list")}等待你确认计划</span>` : t && pendingConfirms(t).length ? `<span class="tb-text warn">${icon("alert")}等待你确认操作</span>` : `<span class="tb-text">${icon("hand")}等待你的回复</span>`;
   else if (S.status === "error") text = `<span class="tb-text err">${icon("alert")}任务出错</span>`;
   else if (S.status === "stopped") text = `<span class="tb-text">${icon("stop")}任务已停止</span>`;
   else text = `<span class="tb-text ok">${icon("check")}任务已完成</span>`;
@@ -590,7 +601,8 @@ function renderComposerState() {
   btn.classList.toggle("stop", !!busy && !hasText);
   btn.innerHTML = icon(busy && !hasText ? "stop" : "arrowUp");
   btn.disabled = !(hasText || busy);
-  btn.title = busy && !hasText ? "停止" : "发送";
+  btn.title = busy && !hasText ? "停止" : busy ? "立即发送（插话）" : "发送";
+  $("#queue-btn").classList.toggle("hidden", !(busy && hasText));
   $("#input").placeholder = S.current ? "向 OpenManus 发送消息" : "分配一个任务或提问任何问题";
 }
 
@@ -1926,7 +1938,7 @@ async function ensureSession() {
 }
 
 // ------------------------------------------------------------------ composer ---
-async function submit(text) {
+async function submit(text, queue = false) {
   text = text.trim();
   if (!text && S.status === "running") { send({ type: "stop_session", sessionId: S.current }); return; }
   if (!text) return;
@@ -1934,7 +1946,8 @@ async function submit(text) {
   const sid = await ensureSession();
   S.modelSel = sel;
   await new Promise((r) => setTimeout(r, 60));
-  send({ type: "user_message", sessionId: sid, content: text, attachments: S.attachments.map((a) => a.path), model: sel, skills: S.pickedSkills });
+  send({ type: "user_message", sessionId: sid, content: text, attachments: S.attachments.map((a) => a.path), model: sel, skills: S.pickedSkills,
+    ...(queue ? { deliveryMode: "queue" } : {}), ...($("#opt-confirm-plan").checked ? { confirmPlan: true } : {}) });
   S.attachments = []; S.pickedSkills = []; renderAttachments();
   $("#input").value = ""; autoGrow(); stickBottom = true;
   renderComposerState();
@@ -1967,6 +1980,7 @@ function bind() {
   $("#plus-btn").onclick = (e) => { e.stopPropagation(); $("#plus-menu").classList.toggle("hidden"); $("#skill-pick").classList.add("hidden"); };
   $("#plus-skills").onclick = async (e) => { e.stopPropagation(); await loadSkills(); renderSkillPick(); $("#skill-pick").classList.toggle("hidden"); };
   $("#plus-menu").onclick = (e) => e.stopPropagation();
+  $("#queue-btn").onclick = () => submit($("#input").value, true);
   $("#plus-target").onclick = async (e) => {
     e.stopPropagation(); await loadComputers();
     $("#target-pick").innerHTML = `<label class="mode-item"><input type="radio" name="tgt" value="" ${S.target ? "" : "checked"} /><span class="grow">云沙箱<span class="muted"> 每个任务独立</span></span></label>` +
@@ -2270,6 +2284,12 @@ function bind() {
       case "plan": e.stopPropagation(); S.planOpen = !S.planOpen; renderTaskbar(); return;
       case "takeover": if (!S.readonly) toggleTakeover(); break;
       case "know": if (!S.readonly) knowAction(a.dataset.op, a.dataset.id); break;
+      case "plan-confirm": {
+        if (S.readonly) break;
+        const steps = ($(`#plan-edit-${t.id}`)?.value || "").split("\n").map((x) => x.trim()).filter(Boolean);
+        send({ type: "confirm_plan", sessionId: S.current, approved: a.dataset.ok === "1", steps });
+        t.planConfirm = null; rerender(t); break;
+      }
       case "slide": { S.slideIdx = { ...(S.slideIdx || {}), [a.dataset.id]: +a.dataset.i }; renderPanel(); break; }
       case "add-skill": {
         e.stopPropagation();

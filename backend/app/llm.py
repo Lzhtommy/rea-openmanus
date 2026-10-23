@@ -151,7 +151,7 @@ def partial_text(arguments: str) -> str | None:
     return "".join(out).encode("utf-16", "surrogatepass").decode("utf-16", "replace")
 
 
-async def _accumulate(chunks: AsyncIterator, on_delta: Delta | None, text_id: str) -> Reply:
+async def _accumulate(chunks: AsyncIterator, on_delta: Delta | None, text_id: str, on_tool=None) -> Reply:
     content, reasoning, finish = "", "", None
     thinking: list[dict] = []
     calls: dict[int, dict] = {}
@@ -187,6 +187,8 @@ async def _accumulate(chunks: AsyncIterator, on_delta: Delta | None, text_id: st
                 c["args"] += tc.function.arguments or ""
             if c["name"] in STREAMED_TOOLS and c["id"]:
                 push(c["id"], partial_text(c["args"]))
+            if on_tool and c["id"] and c["name"]:  # Manus' toolUsed status "streaming": arguments still arriving
+                on_tool(c["id"], c["name"], c["args"])
     ordered = [(c["id"], c["name"], c["args"]) for _, c in sorted(calls.items())]
     return _blocks(thinking, reasoning, content, ordered, finish)
 
@@ -297,7 +299,7 @@ def _common(p: Profile, effort: str | None) -> dict:
 
 
 async def agent_step(messages: list[dict], effort: str, on_delta: Delta | None = None,
-                     text_id: str = "text", profile: Profile | None = None) -> Reply:
+                     text_id: str = "text", profile: Profile | None = None, on_tool=None) -> Reply:
     """One agent-loop iteration: the model selects the next tool call(s).
 
     With on_delta, the reply is streamed and user-facing text is reported as it arrives
@@ -311,7 +313,7 @@ async def agent_step(messages: list[dict], effort: str, on_delta: Delta | None =
     if on_delta is None:
         return _reply(await client(p).chat.completions.create(**kw))
     stream = await client(p).chat.completions.create(**kw, stream=True)
-    return await _accumulate(stream, on_delta, text_id)
+    return await _accumulate(stream, on_delta, text_id, on_tool)
 
 
 _no_json_schema: set[tuple[str, str]] = set()  # (provider, model) that reject json_schema output (e.g. DeepSeek)

@@ -104,7 +104,8 @@ class Agent:
             text_id = f"txt-{short_id()}"
             try:
                 resp = await llm.agent_step(self.messages, self.effort, on_delta=self._on_delta if self.role == "main" else None,
-                                            text_id=text_id, profile=self.profile)
+                                            text_id=text_id, profile=self.profile,
+                                            on_tool=self._on_tool_stream if self.role == "main" else None)
             except llm.BadRequestError as e:
                 await self._error(f"LLM request rejected: {e.message}")
                 return
@@ -168,6 +169,21 @@ class Agent:
             return
         self._delta_at[stream_id] = now
         asyncio.get_running_loop().create_task(self.host.emit({"type": "chatDelta", "streamId": stream_id, "content": text}))
+
+    def _on_tool_stream(self, call_id: str, name: str, args: str) -> None:
+        """Show a step while the model is still writing its arguments (throttled)."""
+        if name in ("message_notify_user", "message_ask_user", "plan_update", "idle") or name not in TOOL_NAMES:
+            return
+        now = time.monotonic()
+        if now - self._delta_at.get(call_id, 0) < 0.4:
+            return
+        self._delta_at[call_id] = now
+        m = re.search(r'"brief"\s*:\s*"((?:[^"\\]|\\.)*)', args)
+        act, _ = describe(name, {})
+        asyncio.get_running_loop().create_task(self.host.emit({
+            "type": "toolUsed", "tool": ui_category(name), "name": name, "id": call_id, "actionId": call_id, "status": "streaming",
+            "brief": (m.group(1) if m else "")[:160], "planStepId": self.plan_step_id, "message": {"action": act, "param": ""},
+            "detail": {"argumentsLength": len(args)}}))
 
     def repair_history(self) -> None:
         """After a cancel/crash, close any tool_use left without results."""

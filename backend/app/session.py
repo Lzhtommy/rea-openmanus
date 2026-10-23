@@ -34,6 +34,9 @@ class Session(AgentHost):
         self.messages: list[dict] = []
         self.plan: list[dict] = []
         self.inbox: list[str] = []
+        self.queued: list[str] = []  # requests sent with deliveryMode "queue": run one after another
+        self.confirm_next_plan = False
+        self.plan_future: asyncio.Future | None = None
         self.pending_reply: asyncio.Future | None = None
         self.pending_confirms: dict[str, asyncio.Future] = {}
         self.mr_controls: dict[str, asyncio.Queue] = {}  # running map-reduce batches -> control queue
@@ -294,11 +297,35 @@ class Session(AgentHost):
         self.model_selection = {k: selection[k] for k in ("mode", "provider", "model") if selection.get(k)}
         self.persist()
 
+    async def _confirm_plan(self) -> list[str] | None:
+        """Wait for the user to approve (possibly edited) plan steps; None = rejected."""
+        await self.emit({"type": "planConfirm", "tasks": self.plan})
+        await self.emit({"type": "statusUpdate", "agentStatus": "waiting", "description": "等待你确认计划"})
+        self.plan_future = asyncio.get_event_loop().create_future()
+        try:
+            steps = await self.plan_future
+        finally:
+            self.plan_future = None
+        await self.emit({"type": "planConfirmed", "approved": steps is not None})
+        if steps is not None:
+            await self.emit({"type": "statusUpdate", "agentStatus": "running"})
+        return steps
+
+    def resolve_plan(self, approved: bool, steps: list[str] | None = None) -> bool:
+        if not self.plan_future or self.plan_future.done():
+            return False
+        clean = [str(x).strip()[:120] for x in steps or [] if str(x).strip()]
+        self.plan_future.set_result((clean or [x["title"] for x in self.plan]) if approved else None)
+        return True
+
     async def user_message(self, text: str, attachments: list[str], selected_skills: list[str] | None = None,
-                           event: dict | None = None) -> None:
+                           event: dict | None = None, queue: bool = False, confirm_plan: bool = False) -> None:
         """event: {source, text} when an automation sent this message; shown apart from the request."""
         picked = [n for n in selected_skills or [] if n in skills.store.items]
-        await self.emit({"type": "chat", "sender": "user", "messageType": "text", "content": text,
+        busy = bool(self.task and not self.task.done())
+        queued = queue and busy and not self.pending_confirms and not (self.pending_reply and not self.pending_reply.done())
+        self.confirm_next_plan = confirm_plan or self.confirm_next_plan
+        await self.emit({"type": "chat", "sender": "user", "messageType": "text", "content": text, **({"queued": True} if queued else {}),
                          "attachments": [{"path": p, "filename": p.rsplit("/", 1)[-1], "url": self.file_url(p)}
                                          for p in attachments], **({"skills": picked} if picked else {}),
                          **({"triggerEvent": event} if event else {})})
@@ -309,6 +336,13 @@ class Session(AgentHost):
             full += ("\n\n<selected_skills>\nThe user chose these skills for this request. Read each SKILL.md with "
                      "file_read before starting and follow it:\n" + "\n".join(f"- {self._skills_dir()}/{n}/SKILL.md" for n in picked)
                      + "\n</selected_skills>")
+        if queued:
+            self.queued.append(full)
+            return
+        if self.plan_future and not self.plan_future.done():  # typing instead of approving the plan: revise it
+            self.resolve_plan(False)
+            self.inbox.append(full)
+            return
         if self.pending_confirms:
             # Typing instead of approving means "no": decline the held actions and pass the message on.
             for aid in list(self.pending_confirms):
@@ -323,6 +357,7 @@ class Session(AgentHost):
 
     async def stop(self) -> None:
         self.inbox.clear()
+        self.queued.clear()
         if self.task and not self.task.done():
             self.task.cancel()
             try:
@@ -398,6 +433,19 @@ class Session(AgentHost):
                     self.plan[:] = [{"id": f"step-{short_id()}", "title": t, "status": "pending",
                                      "startedAt": None, "endAt": None} for t in p["steps"]]
                     await self.emit({"type": "planUpdate", "tasks": self.plan})
+                    if self.confirm_next_plan:  # Manus' confirm_submit_plan: the user approves or edits the plan first
+                        self.confirm_next_plan = False
+                        steps = await self._confirm_plan()
+                        if steps is None:
+                            if self.inbox:  # the user typed changes instead: re-plan with them (and confirm again)
+                                self.confirm_next_plan = True
+                                return
+                            await self.emit({"type": "statusUpdate", "agentStatus": "stopped", "description": "计划未获批准"})
+                            return
+                        if steps != [x["title"] for x in self.plan]:
+                            self.plan[:] = [{"id": f"step-{short_id()}", "title": t, "status": "pending",
+                                             "startedAt": None, "endAt": None} for t in steps]
+                            await self.emit({"type": "planUpdate", "tasks": self.plan})
                     system_notes.append(
                         f"<plan source=\"planner\">\nGoal: {p.get('goal', '')}\n{render_plan(self.plan)}\n</plan>\n"
                         "Mark steps running/completed with plan_update as you work.")
@@ -422,6 +470,8 @@ class Session(AgentHost):
             if self.inbox and self.status != "stopped":
                 pending = "\n\n".join(self.drain_inbox())
                 self.task = asyncio.create_task(self._run(pending))
+            elif self.queued and self.status != "stopped":  # Manus' deliveryMode "queue": next request after this one
+                self.task = asyncio.create_task(self._run(self.queued.pop(0)))
 
 
     async def _suggest(self, request: str) -> None:

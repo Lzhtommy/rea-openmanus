@@ -1118,12 +1118,15 @@ async def ws(websocket: WebSocket):
                 text = (msg.get("content") or "").strip()
                 s.select_model(msg.get("model"))
                 if text:
-                    await s.user_message(text, msg.get("attachments") or [], msg.get("skills") or [])
+                    await s.user_message(text, msg.get("attachments") or [], msg.get("skills") or [],
+                                         queue=msg.get("deliveryMode") == "queue", confirm_plan=bool(msg.get("confirmPlan")))
             elif kind == "stop_session":
                 await s.stop()
             elif kind == "map_reduce_control":
                 idx = msg.get("index")
                 s.control_map_reduce(str(msg.get("actionId")), str(msg.get("op")), int(idx) if idx is not None else None)
+            elif kind == "confirm_plan":
+                s.resolve_plan(bool(msg.get("approved")), msg.get("steps"))
             elif kind == "confirm_action":
                 s.resolve_confirm(str(msg.get("actionId")), bool(msg.get("approved")))
     except WebSocketDisconnect:

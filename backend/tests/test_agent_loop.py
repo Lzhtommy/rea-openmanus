@@ -45,7 +45,7 @@ class ScriptedModel:
         self.calls = []
         self.profiles = []
 
-    async def __call__(self, messages, effort, on_delta=None, text_id="text", profile=None):
+    async def __call__(self, messages, effort, on_delta=None, text_id="text", profile=None, **kw):
         self.profiles.append(profile)
         self.calls.append([m["role"] for m in messages])
         reply = await self._next(messages)
@@ -697,7 +697,7 @@ async def test_triggers(store, monkeypatch, tmp_path):
     prices = iter(["399", "399", "349"])
     seen_briefs, refusals = [], []
 
-    async def model(messages, effort, on_delta=None, text_id="text", profile=None):
+    async def model(messages, effort, on_delta=None, text_id="text", profile=None, **kw):
         first = messages[0]["content"]
         if isinstance(first, str) and "checking a condition" in first:
             seen_briefs.append(first)
@@ -966,7 +966,7 @@ async def test_agent_team(store, monkeypatch, tmp_path):
     team = agents.store.create_team({"name": "内容小组", "members": [lead["id"], r["id"], w["id"]], "lead": lead["id"]})
     starts = {}
 
-    async def model(messages, effort, on_delta=None, text_id="text", profile=None):
+    async def model(messages, effort, on_delta=None, text_id="text", profile=None, **kw):
         first = messages[0]["content"]
         if isinstance(first, str) and "member of an agent team" in first:
             who = first.split('You are "')[1].split('"')[0]
@@ -990,3 +990,33 @@ async def test_agent_team(store, monkeypatch, tmp_path):
     assert sorted(e["status"] for e in done) == ["error", "success", "success"]
     assert abs(starts["研究员"] - starts["写手"]) < 0.8  # delegations in one turn run in parallel
     assert {e["detail"]["delegate"]["result"] for e in done if e["status"] == "success"} == {"研究员 done", "写手 done"}
+
+
+@pytest.mark.asyncio
+async def test_plan_confirm_and_queue(store, monkeypatch):
+    """confirmPlan holds the run until the user approves (edited) steps; queued requests run one after another."""
+    model = ScriptedModel([msg(tool("shell_exec", command="sleep 1")), msg(tool("idle")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("做个调研", [], confirm_plan=True)
+    for _ in range(100):
+        if s.plan_future:
+            break
+        await asyncio.sleep(0.05)
+    assert any(e["type"] == "planConfirm" for e in s.events) and s.status == "waiting"
+    assert s.resolve_plan(True, ["只做第一步", " ", "交付"])
+    for _ in range(100):
+        if any(e.get("name") == "shell_exec" for e in s.events):
+            break
+        await asyncio.sleep(0.05)
+    await s.user_message("然后再总结一下", [], queue=True)  # sent while running: waits its turn
+    queued = next(e for e in s.events if e["type"] == "chat" and e.get("queued"))
+    assert queued["content"] == "然后再总结一下" and s.queued
+    await wait_status(s, {"idle"})
+    for _ in range(100):
+        if not s.queued and s.task.done() and len([m for m in s.messages if m["role"] == "user" and isinstance(m["content"], list)
+                                                    and any(b.get("type") == "text" and "总结" in b.get("text", "") for b in m["content"])]):
+            break
+        await asyncio.sleep(0.05)
+    await wait_status(s, {"idle"})
+    assert any("只做第一步" in str(m["content"]) for m in s.messages if m["role"] == "system")

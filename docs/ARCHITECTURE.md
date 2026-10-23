@@ -212,6 +212,7 @@ webdev 全栈托管（自定义域名、Stripe 等）、Connectors 和 MCP 市�
 | 连接新计算机、"本地计算机"运行、My Browser、`confirm_local_terminal_execution` | `devices.py` + `device/openmanus_device.py`：连接器在本机启动 `sandbox/server.py`，经 `/api/devices/connect` WebSocket 转发 HTTP；`DeviceTransport`（httpx 传输层）让 `dev-<id>` 成为普通沙箱；令牌只显示一次、哈希存储；本机上的 shell / 写文件逐条确认；`BROWSER_CDP_URL` 让动作服务接管用户自己的 Chrome |
 | Computer Use 页（此计算机上的 Manus、My Browser、技能录制器） | `recordings.py` + 沙箱 `/browser/record/*`：注入记录脚本（`expose_binding` + `add_init_script`，跨页面跳转保留），元素用可见文字描述、从不记录字段值和密码；`llm.draft_recorded_skill` 结构化输出 SKILL.md 草稿；云端录制使用一次性沙箱 `rec-<id>`，结束即销毁 |
 | Agent 页（已迁移到 Cue：自定义 Agent、Agent 团队）；`toolUsed.tool: agent` | `agents.py`：Agent = 角色（指令、默认模式与技能），以 `<agent_role>` 系统消息注入；团队任务由负责人执行，`<agent_team>` 列出成员，`agent_delegate` 以成员指令运行子代理（可并行），面板展示子任务与结果 |
+| `toolUsed.status: streaming`、`confirm_submit_plan`、`user_message.deliveryMode: "queue"`、`queueStatusChange` | 流式累积时回调 `on_tool`，主代理节流发出 `streaming` 事件（带已解析出的 brief）；`planConfirm` / `planConfirmed` 事件与 `confirm_plan` 消息，输入文字即视为修改意见并重新规划；排队消息带 `queued` 标记，客户端按"排队中"的轮次挂起，当前运行结束后依次执行 |
 | `ScheduledTask` / 自动化 | `scheduler.py`（once/interval/daily/weekly），`/api/schedules`、`schedule_create` 工具、"自动化"页面 |
 这些都是在同一个 Agent 内核上叠加的业务功能，事件协议里已预留扩展点（`toolUsed.tool` 新增类别即可）。
 
