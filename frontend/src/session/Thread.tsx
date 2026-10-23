@@ -290,7 +290,8 @@ const TurnView = memo(function TurnView({ t, isLast }: { t: Turn; rev: number; i
   const running = !isFinished(t);
   const finished = !running;
   const open = t.open ?? (running || fi < 0);
-  const hasAssistant = t.items.length > 0 || running;
+  // a run that failed before producing anything still shows its error
+  const hasAssistant = t.items.length > 0 || running || t.status === "error";
   const now = S.clockNow || Date.now(); // replays run on the recording's clock
   const dur = fmtDur((t.end || now) - (t.start || now));
   const toggleLog = () => { t.open = !(t.open ?? (!isFinished(t) || finalIndex(t) < 0)); touch(t); render(); };
