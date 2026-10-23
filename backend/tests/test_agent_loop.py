@@ -804,3 +804,41 @@ async def test_slides_and_media(store, monkeypatch):
                 and b.get("type") == "tool_result" and isinstance(b.get("content"), list))
     assert any(x.get("type") == "image" for x in sent["content"])  # the model sees a preview of its image
     assert {"index.pdf", "index.pptx", "a.png", "b.png"} <= {f["filename"] for f in s.files.values()}
+
+
+@pytest.mark.asyncio
+async def test_publish_site(store, monkeypatch, tmp_path):
+    """deploy_publish copies a site out of the sandbox; it is served on its own host, versioned, and isolated."""
+    import pathlib
+    from app import main, sites
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIRM_ENABLED", False)
+    sites.store = sites.Sites()
+    model = ScriptedModel([
+        msg(tool("file_write", file="game/index.html", content="<h1>v1</h1><script src='app.js'></script>"),
+            ),
+        msg(tool("file_write", file="game/app.js", content="console.log(1)")),
+        msg(tool("file_write", file="game/node_modules/x.js", content="skip me")),
+        msg(tool("deploy_publish", path="game", title="Snake Game", kind="game")),
+        msg(tool("file_write", file="game/index.html", content="<h1>v2</h1>")),
+        msg(tool("deploy_publish", path="game/index.html", title="Snake Game", kind="game")),
+        msg(tool("deploy_publish", path="nothing-here", title="x")),
+        msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("做个游戏并发布", [])
+    await wait_status(s, {"idle"}, timeout=90)
+    pubs = [e for e in s.events if e.get("name") == "deploy_publish" and e["status"] in ("success", "error")]
+    assert [e["status"] for e in pubs] == ["success", "success", "error"], [e.get("detail") for e in pubs]
+    site = next(iter(sites.store.items.values()))
+    assert len(sites.store.items) == 1 and site["current"] == 2 and site["kind"] == "game"
+    assert site["slug"].startswith("snake-game-") and pubs[0]["detail"]["site"]["url"].startswith(f"http://{site['slug']}.")
+    assert not (sites.store.root / site["id"] / "v1" / "node_modules").exists()
+    page = main._serve_site(site["slug"], "", sandboxed=False)
+    assert page.status_code == 200 and "content-security-policy" not in page.headers
+    assert b"v2" in pathlib.Path(page.path).read_bytes()
+    assert "sandbox" in main._serve_site(site["slug"], "app.js", sandboxed=True).headers["content-security-policy"]
+    assert main._serve_site(site["slug"], "../../sites.json", sandboxed=False).status_code == 404
+    assert pathlib.Path(main._serve_site(site["slug"], "some/route", sandboxed=False).path).name == "index.html"  # SPA
+    sites.store.update(site["id"], {"current": 1})
+    assert b"v1" in pathlib.Path(main._serve_site(site["slug"], "index.html", sandboxed=False).path).read_bytes()

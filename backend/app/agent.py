@@ -67,6 +67,7 @@ class AgentHost:
     async def keep_file(self, path: str, kind: str) -> None: ...
     def create_schedule(self, args: dict) -> dict: raise NotImplementedError
     def propose_knowledge(self, title: str, content: str) -> dict: raise NotImplementedError
+    async def publish_site(self, sandbox, args: dict) -> dict: raise NotImplementedError
     def create_trigger(self, args: dict) -> dict: raise NotImplementedError
     def skill_used(self, name: str) -> None: ...
     def preview_url(self, port: int) -> str: return ""
@@ -261,6 +262,7 @@ class Agent:
             return True
         await self.host.emit({**base, "id": base["actionId"], "status": "need_confirm",
                               "confirm": {"reason": reason, "command": args.get("command") or args.get("input") or
+                                          (f"{args.get('path')}  →  「{args.get('title', '')}」" if name == "deploy_publish" else "") or
                                           (json.dumps(args.get("arguments") or {}, ensure_ascii=False, indent=1) if name == "mcp_call_tool" else ""),
                                           "port": args.get("port")}})
         approved = await self.host.confirm(base["actionId"])
@@ -447,6 +449,16 @@ class Agent:
             return await self._generate_media(name.removeprefix("media_generate_"), a)
 
         # ---- deploy
+        if name == "deploy_publish":
+            from .sites import SiteError
+            try:
+                site = await host.publish_site(sb, a)
+            except SiteError as e:
+                return ToolOutcome(f"Could not publish: {e}", is_error=True, detail={"error": str(e)})
+            v = site["current"]
+            return ToolOutcome(f"Published \"{site['title']}\" (version {v}) at {site['url']} . It stays online after this task; "
+                               "the user manages it under 创作. Give the user this URL.",
+                               {"site": {k: site[k] for k in ("id", "title", "kind", "url", "thumbUrl", "current", "slug")}})
         if name == "deploy_expose_port":
             url = host.preview_url(int(a["port"]))
             return ToolOutcome(f"Port {a['port']} exposed to the user at {url} . That URL is reachable by the user, not "

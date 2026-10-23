@@ -60,6 +60,9 @@ const ICONS = {
   spark: '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
   github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.1-1.3-.3-2.5-1-3.5.3-1.2.3-2.4 0-3.5 0 0-1 0-3 1.5-2.6-.5-5.4-.5-8 0C6 2 5 2 5 2c-.3 1.1-.3 2.3 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.4.5-.7 1-.8 1.6-.2.6-.3 1.3-.2 1.9v4"/><path d="M9 18c-4.5 2-5-2-7-2"/>',
+  sparkBox: '<rect width="18" height="18" x="3" y="3" rx="4"/><path d="M12 7.5l1.2 3.3 3.3 1.2-3.3 1.2L12 16.5l-1.2-3.3L7.5 12l3.3-1.2z"/>',
+  gamepad: '<path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><rect width="20" height="12" x="2" y="6" rx="6"/>',
+  phone: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>',
   presentation: '<path d="M2 3h20M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3M7 21l5-5 5 5"/>',
   film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M3 12h18M3 16.5h4M17 7.5h4M17 16.5h4"/>',
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
@@ -118,7 +121,7 @@ const TOOL = {
 const ACTION_ZH = {
   "Executing command": "执行命令", "Checking terminal": "查看终端", Browsing: "浏览", Typing: "输入", Clicking: "点击",
   "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务", "Searching tools": "搜索工具", "Using MCP": "调用工具", "Saving knowledge": "提议记住", "Searching images": "搜索图片", "Searching papers": "搜索论文",
-  "Exporting slides": "渲染幻灯片", "Generating image": "生成图片", "Generating speech": "生成语音", "Generating video": "生成视频",
+  "Exporting slides": "渲染幻灯片", "Publishing site": "发布站点", "Generating image": "生成图片", "Generating speech": "生成语音", "Generating video": "生成视频",
   Searching: "搜索", "Reading webpage": "提取网页", "Running parallel sub-agents": "并行执行子任务", "Exposing port": "部署预览",
 };
 const zh = (a) => ACTION_ZH[a] || a || "";
@@ -135,7 +138,7 @@ const S = {
   vnc: false, vncFailed: false,
   attachments: [], previews: {},
   personal: { profile: {}, instructions: "", knowledge: [] }, persTab: "profile", editingKnow: null,
-  plugins: { plugins: [], categories: [] }, plugCat: "all", plugOpen: null,
+  plugins: { plugins: [], categories: [] }, plugCat: "all", plugOpen: null, sites: [], crTab: "all",
   triggers: [], activity: [], autoTab: "activity", editingTrig: null,
   skills: { skills: [], catalog: [], categories: [] }, skTab: "explore", skCat: "all", skSrc: "all", pickedSkills: [], skillView: null,
 };
@@ -257,9 +260,11 @@ function scheduleRender(scrollEnd = false) {
 }
 
 function renderAll() {
-  const auto = S.view === "automations", conn = S.view === "connectors", plug = S.view === "plugins";
+  const auto = S.view === "automations", conn = S.view === "connectors", plug = S.view === "plugins", cr = S.view === "creations";
   const proj = S.view === "project", pers = S.view === "personal", sk = S.view === "skills";
-  const lib = S.view === "library" || auto || conn || proj || pers || sk || plug; // full-page views without a composer dock
+  const lib = S.view === "library" || auto || conn || proj || pers || sk || plug || cr; // full-page views without a composer dock
+  $("#creations").classList.toggle("hidden", !cr);
+  $("#nav-create").classList.toggle("active", cr);
   $("#plugins").classList.toggle("hidden", !plug);
   $("#personal").classList.toggle("hidden", !pers);
   $("#skills").classList.toggle("hidden", !sk);
@@ -276,8 +281,8 @@ function renderAll() {
   $("#dock").classList.toggle("hidden", home || lib);
   $("#nav-library").classList.toggle("active", S.view === "library");
   (proj ? $("#proj-slot") : home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  $("#composer").classList.toggle("hidden", pers || sk || plug || conn);
-  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : sk ? "技能" : plug ? "插件" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  $("#composer").classList.toggle("hidden", pers || sk || plug || conn || cr);
+  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : sk ? "技能" : plug ? "插件" : cr ? "创作" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   renderModeButton();
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
@@ -286,6 +291,7 @@ function renderAll() {
   if (auto) { renderAutomations(); renderPanel(); return; }
   if (conn) { renderConnectors(); renderPanel(); return; }
   if (plug) { renderPlugins(); renderPanel(); return; }
+  if (cr) { renderCreations(); renderPanel(); return; }
   if (proj) { renderProject(); renderPanel(); return; }
   if (pers) { renderPersonal(); renderPanel(); return; }
   if (sk) { renderSkills(); renderPanel(); return; }
@@ -415,6 +421,7 @@ function summarize(steps) {
     else if (n === "shell_exec") c.cmd++;
     else if (n.startsWith("shell_")) c.term++;
     else if (n === "agent_map_reduce") c.mr++;
+    else if (n === "deploy_publish") c.pub = (c.pub || 0) + 1;
     else if (n.startsWith("deploy_")) c.dep++;
     else if (n.startsWith("schedule_")) c.sched = (c.sched || 0) + 1;
     else if (n === "trigger_create") c.trig = (c.trig || 0) + 1;
@@ -437,6 +444,7 @@ function summarize(steps) {
   if (c.find) parts.push(`搜索了 ${c.find} 次文件`);
   if (c.mr) parts.push(`并行执行了 ${c.mr} 批子任务`);
   if (c.dep) parts.push(`部署了 ${c.dep} 个服务`);
+  if (c.pub) parts.push(`发布了 ${c.pub} 次站点`);
   if (c.sched) parts.push(`创建了 ${c.sched} 个定时任务`);
   if (c.trig) parts.push(`创建了 ${c.trig} 个触发器`);
   if (c.sl) parts.push(`渲染了 ${c.sl} 次幻灯片`);
@@ -670,6 +678,7 @@ function stepView(s) {
   }
   if (d.trigger) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${trigCardHtml(d.trigger, false)}</div></div>`;
   if (d.schedule) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${autoCardHtml(d.schedule, false)}</div></div>`;
+  if (d.site) return `<div class="urlbar">${icon("globe")}<a href="${esc(d.site.url)}" target="_blank">${esc(d.site.url)}</a><span class="lib-tag">v${esc(d.site.current)}</span></div><iframe class="preview-frame" style="height:calc(100% - 37px)" src="${esc(d.site.url)}"></iframe>`;
   if (d.deploy) return `<div class="urlbar">${icon("globe")}<a href="${esc(d.deploy.url)}" target="_blank">${esc(d.deploy.url)}</a></div><iframe class="preview-frame" style="height:calc(100% - 37px)" src="${esc(d.deploy.url)}"></iframe>`;
   if (d.error) return `<div class="err-view"><div class="term">${esc(d.error)}</div></div>`;
   if (s.status === "start" || s.status === "running") return `<div class="pc-empty"><span class="shimmer">${esc(s.brief || zh(s.message?.action))}</span></div>`;
@@ -851,6 +860,38 @@ async function connAction(a, id) {
   if (a === "toggle") await fetch(`/api/connectors/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !c.enabled }) });
   if (a === "restart") { c.status = "connecting"; renderConnectors(); await fetch(`/api/connectors/${id}/restart`, { method: "POST" }); }
   loadConns();
+}
+
+// ------------------------------------------------------------------ creations (创作) ---
+const CR_KINDS = { website: ["网站", "globe"], game: ["游戏", "gamepad"], app: ["移动应用", "phone"] };
+async function openCreations() {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "creations";
+  history.replaceState(null, "", "#creations");
+  renderSessions(); await loadSites();
+}
+async function loadSites() { try { S.sites = await (await fetch("/api/sites")).json(); } catch { S.sites = []; } scheduleRender(); }
+function renderCreations() {
+  const n = (k) => S.sites.filter((x) => k === "all" || x.kind === k).length;
+  $("#cr-tabs").innerHTML = [["all", "全部"], ...Object.entries(CR_KINDS).map(([k, [l]]) => [k, l])].map(([k, l]) => `<button class="lib-tab ${S.crTab === k ? "on" : ""}" data-crtab="${k}">${l}<span>${n(k)}</span></button>`).join("");
+  const rows = S.sites.filter((x) => S.crTab === "all" || x.kind === S.crTab);
+  $("#cr-list").innerHTML = rows.length ? `<div class="cr-grid">${rows.map((x) => {
+    const [label, ic] = CR_KINDS[x.kind] || CR_KINDS.website;
+    const sess = S.sessions.find((y) => y.id === x.sessionId);
+    const versions = x.versions.length > 1 ? `<select class="cr-ver" data-site="${esc(x.id)}" title="版本">${[...x.versions].reverse().map((v) => `<option value="${v.n}" ${v.n === x.current ? "selected" : ""}>v${v.n} · ${esc(fmtDate(v.at))}</option>`).join("")}</select>` : `<span class="lib-tag">v${x.current}</span>`;
+    return `<div class="cr-card"><a class="cr-thumb" href="${esc(x.url)}" target="_blank">${x.thumbUrl ? `<img src="${esc(x.thumbUrl)}?v=${x.current}" alt="" loading="lazy" />` : icon(ic)}</a>` +
+      `<div class="cr-body"><div class="cr-title"><span class="grow">${esc(x.title)}</span><span class="lib-tag">${icon(ic)}${label}</span></div>` +
+      `<div class="cr-url"><a href="${esc(x.url)}" target="_blank">${esc(x.url.replace(/^https?:\/\//, ""))}</a><button class="icon-btn sm" data-cr="copy" data-site="${esc(x.id)}" title="复制链接">${icon("copy")}</button></div>` +
+      `<div class="auto-foot"><div class="auto-runs">${sess ? `<a href="#${esc(x.sessionId)}" data-goto="${esc(x.sessionId)}">${icon("message")}${esc(sess.title)}</a>` : ""}<span>更新于 ${esc(fmtDate(x.updatedAt))}</span></div>${versions}` +
+      `<button class="icon-btn sm" data-cr="del" data-site="${esc(x.id)}" title="下线并删除">${icon("trash")}</button></div></div></div>`;
+  }).join("")}</div>` : `<div class="lib-empty">${icon("sparkBox")}<div>还没有创作内容</div><div class="muted">让 OpenManus 做一个网站、小游戏或应用，发布后会出现在这里，并有一个固定的访问地址</div></div>`;
+}
+async function crAction(op, id, el) {
+  const x = S.sites.find((y) => y.id === id); if (!x) return;
+  if (op === "copy") { try { await navigator.clipboard.writeText(x.url); el.innerHTML = icon("check"); } catch { /* ignore */ } return; }
+  if (op === "del") { if (!confirm(`下线「${x.title}」？链接将失效，所有版本都会删除。`)) return; await fetch(`/api/sites/${id}`, { method: "DELETE" }); }
+  if (op === "version") await fetch(`/api/sites/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current: +el.value }) });
+  loadSites();
 }
 
 // ------------------------------------------------------------------ plugins (插件) ---
@@ -1619,6 +1660,14 @@ function bind() {
     if (e.target.closest("#share-bar-copy")) navigator.clipboard?.writeText(location.href).then(() => (e.target.closest("button").lastChild.textContent = "已复制"));
   });
   $("#nav-conn").onclick = openPlugins;
+  $("#nav-create").onclick = openCreations;
+  $("#cr-tabs").onclick = (e) => { const b = e.target.closest("[data-crtab]"); if (b) { S.crTab = b.dataset.crtab; renderCreations(); } };
+  $("#cr-list").onclick = (e) => {
+    const g = e.target.closest("[data-goto]"); if (g) { e.preventDefault(); openSession(g.dataset.goto); return; }
+    const b = e.target.closest("[data-cr]"); if (b) crAction(b.dataset.cr, b.dataset.site, b);
+  };
+  $("#cr-list").onchange = (e) => { if (e.target.matches(".cr-ver")) crAction("version", e.target.dataset.site, e.target); };
+  $("#cr-build").onclick = () => { goHome(); $("#input").value = "帮我做一个网站："; autoGrow(); renderComposerState(); $("#input").focus(); };
   $("#conn-back").onclick = openPlugins;
   $("#plug-manage").onclick = openConnectors;
   $("#plug-create").onclick = () => openConnForm(null);
@@ -1884,6 +1933,7 @@ async function deleteSession(sid) {
   else if (sid === "automations") openAutomations();
   else if (sid === "connectors") openConnectors();
   else if (sid === "plugins") openPlugins();
+  else if (sid === "creations") openCreations();
   else if (sid === "personal") openPersonal();
   else if (sid === "skills") openSkills();
   else if (sid.startsWith("project/")) openProject(sid.slice(8));
@@ -1893,7 +1943,7 @@ async function deleteSession(sid) {
   window.addEventListener("hashchange", () => {
     const h = location.hash.slice(1);
     if (S.readonly || h === (S.current || "") || (h === S.view && !S.current)) return;
-    if (h === "library") openLibrary(); else if (h === "automations") openAutomations(); else if (h === "connectors") openConnectors(); else if (h === "plugins") openPlugins();
+    if (h === "library") openLibrary(); else if (h === "automations") openAutomations(); else if (h === "connectors") openConnectors(); else if (h === "plugins") openPlugins(); else if (h === "creations") openCreations();
     else if (h === "personal") openPersonal(); else if (h === "skills") openSkills();
     else if (h.startsWith("project/")) openProject(h.slice(8));
     else if (!h || S.sessions.some((s) => s.id === h)) openSession(h || null);

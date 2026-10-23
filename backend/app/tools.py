@@ -143,6 +143,14 @@ _TOOLS = [
         "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1"]}},
        ["prompt", "output_path"]),
     # ---- deploy
+    _t("deploy_publish",
+       "Publish a static website, web game or web app (a folder with index.html, e.g. the build output) at a "
+       "permanent public URL that stays online after this task. Publishing the same folder again from this task "
+       "updates the site. Use deploy_expose_port instead for a temporary preview of a running server.",
+       {"path": {"type": "string", "description": "Folder containing index.html"}, "title": S,
+        "kind": {"type": "string", "enum": ["website", "game", "app"]},
+        "description": {"type": "string", "description": "One sentence about the site"}},
+       ["path", "title"]),
     _t("deploy_expose_port",
        "Expose a service listening on a sandbox port and return a public preview URL.",
        {"port": I}, ["port"]),
@@ -232,6 +240,8 @@ def needs_confirm(name: str, args: dict) -> str | None:
     """Why this call needs the user's approval, or None."""
     if name == "deploy_expose_port":
         return "生成可公开访问的预览链接"
+    if name == "deploy_publish":
+        return "发布到固定网址，任何拿到链接的人都能访问"
     if name in ("shell_exec", "shell_write_to_process"):
         text = args.get("command") or args.get("input") or ""
         for pattern, reason in _RISKY_SHELL:
@@ -334,6 +344,8 @@ def describe(name: str, args: dict) -> tuple[str, str]:
         return "Running parallel sub-agents", f"{len(args.get('items', []))} items"
     if name == "deploy_expose_port":
         return "Exposing port", str(args.get("port", ""))
+    if name == "deploy_publish":
+        return "Publishing site", args.get("title") or args.get("path", "")
     if name == "mcp_search_tools":
         return "Searching tools", args.get("query", "")
     if name == "mcp_call_tool":

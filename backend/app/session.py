@@ -214,6 +214,11 @@ class Session(AgentHost):
                                 "condition": a.get("condition"), "everyMinutes": a.get("every_minutes") or 60},
                                source=self.session_id)
 
+    async def publish_site(self, sandbox, a: dict) -> dict:
+        from . import sites
+        return await sites.store.publish(sandbox, self.session_id, a["path"], a.get("title", ""), a.get("kind") or "website",
+                                         a.get("description") or "")
+
     def propose_knowledge(self, title: str, content: str) -> dict:
         return personal.store.add(title, content, source="agent", session_id=self.session_id, pending=True)
 

@@ -6,7 +6,7 @@
 
 ## 功能
 - **Agent Loop**：分析事件 → 选择工具 → 沙箱执行 → 观察 → 迭代 → 交付 → idle
-- **41 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`（一次 1–3 个查询并发）、`info_search_image`（图片）、`info_search_scholar`（OpenAlex 学术文献）、`info_extract_webpage`、`deploy_expose_port`、`message_*`、`plan_update`、`agent_map_reduce`、`schedule_create`、`trigger_create`、`knowledge_save`、`slides_export`、`media_generate_image/speech/video`、`mcp_*`、`idle`
+- **42 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`（一次 1–3 个查询并发）、`info_search_image`（图片）、`info_search_scholar`（OpenAlex 学术文献）、`info_extract_webpage`、`deploy_expose_port`、`deploy_publish`、`message_*`、`plan_update`、`agent_map_reduce`、`schedule_create`、`trigger_create`、`knowledge_save`、`slides_export`、`media_generate_image/speech/video`、`mcp_*`、`idle`
 - **并行工具调用**：一轮里如果全是只读调用（搜索、网页提取、读文件），就并发执行
 - **Planner 模块**：结构化输出生成计划
 - **技能**（"更多 → 技能"）：官方技能（`backend/skills/`）、个人技能（手动编写、上传 SKILL.md/zip、或让 Agent 用内置的技能创建器写好后在文件卡片上"添加到我的技能"）、第三方技能（从 GitHub 目录导入，探索页有精选目录）；可启用/停用、在线编辑、统计使用次数；输入框"+ → 使用技能"把技能指定给当前消息（对应 Manus 的 `enabledSkills`）。启用的技能整目录装进沙箱，上下文里只放名称和触发说明，Agent 按需读取
@@ -25,6 +25,7 @@
 - **Wide Research 控制**：运行中可停止/重试单个子任务、强制继续；已完成项可在重跑时复用
 - **项目**：项目指令 + 项目文件，项目内的任务自动获得指令并把文件复制到沙箱 `~/project/`
 - **沙箱回收**：空闲（默认 15 分钟）且无人观看、任务不在运行的沙箱自动停止，保留文件，下次使用自动启动
+- **创作（站点托管）**：`deploy_publish` 把沙箱里的静态网站 / 游戏 / 应用（含 index.html 的目录）复制到服务器上的版本化存储，沙箱回收后仍在线；重复发布生成新版本，可在"创作"页切换版本、复制链接、下线。每个站点有独立域名 `<slug>.localhost:8000`（浏览器把 *.localhost 解析到本机；`MANUS_SITES_DOMAIN` 可改为自己的泛域名），与 OpenManus 不同源，站点脚本无法访问其 API；另有带 CSP sandbox 的路径地址 `/sites/<slug>/`。发布前需要确认，发布时在沙箱里截取首页作为封面
 - **创作：幻灯片与媒体生成**：内置"幻灯片"技能与 HTML 模板（1280×720，查看器支持翻页和缩放），`slides_export` 在沙箱里逐页渲染为图片，并导出矢量 PDF 和 PPTX（每页一张图，保留演讲者备注）；电脑面板提供翻页预览和下载。`media_generate_image` 经网关生成或编辑图片（参考图、画幅比例），生成后把缩略图交给模型自检；语音、视频生成接口按 OpenAI 兼容协议实现，模型通过 `MANUS_TTS_MODEL` / `MANUS_VIDEO_MODEL` 开启
 - **个性化**（"更多 → 个性化"）：昵称、职业、关于你、自定义指令对所有任务生效；"知识"保存长期事实和偏好，可启用/停用；任务中 Agent 用 `knowledge_save` 提议记住某条信息，用户在对话里一键接受或忽略；"从其他 AI 导入记忆"把其他助手的记忆导出解析成资料和知识，确认后再写入
 - **自动化**：
@@ -65,6 +66,7 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 | `MANUS_PROMPT_CACHE` | `true` | 是否加 `cache_control` 缓存断点 |
 | `MANUS_EFFORT` / `MANUS_SUBAGENT_EFFORT` | `high` / `medium` | 主代理、子代理的推理强度 |
 | `MANUS_SANDBOX` | `docker` | `docker` 或 `local` |
+| `MANUS_SITES_DOMAIN` | `PUBLIC_BASE_URL` 的主机 | 已发布站点的域名后缀（站点地址为 `<slug>.<域名>`，需泛解析到本服务） |
 | `MANUS_IMAGE_MODEL` / `MANUS_TTS_MODEL` / `MANUS_VIDEO_MODEL` | 空 | 网关上的图片 / 语音 / 视频生成模型，留空即关闭该能力 |
 | `MANUS_SANDBOX_MEMORY` / `MANUS_SANDBOX_CPUS` | `4g` / `2` | 容器资源限制 |
 | `MANUS_PLANNER` | `true` | 是否启用 Planner 模块 |

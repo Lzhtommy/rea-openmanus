@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, connectors, llm, media, personal, plugins, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import config, connectors, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI):
     projects.store = projects.Projects()
     personal.store = personal.Personal()
     skills.store = skills.Skills()
+    sites.store = sites.Sites()
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
     triggers_mod.triggers = triggers_mod.Triggers(session_mod.store)
@@ -686,6 +687,72 @@ async def automation_activity():
                 items.append({"type": "check", "at": c["at"], "met": c["met"], "summary": c["summary"],
                               "source": {"id": t["id"], "kind": "condition", "title": t["title"]}})
     return sorted(items, key=lambda x: -x["at"])[:200]
+
+
+# ------------------------------------------------------------- creations (创作: published sites) ---
+
+def _site(sid: str) -> dict:
+    s = sites.store.items.get(sid)
+    if not s:
+        raise HTTPException(404, "site not found")
+    return s
+
+
+@app.get("/api/sites")
+async def list_sites():
+    return sites.store.list()
+
+
+@app.patch("/api/sites/{sid}")
+async def update_site(sid: str, body: dict):
+    _site(sid)
+    try:
+        return sites.store.update(sid, body)
+    except sites.SiteError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/sites/{sid}")
+async def delete_site(sid: str):
+    _site(sid)
+    sites.store.delete(sid)
+    return {"ok": True}
+
+
+@app.get("/api/sites/{sid}/thumb")
+async def site_thumb(sid: str):
+    p = sites.store.root / _site(sid)["id"] / "thumb.jpg"
+    if not p.is_file():
+        raise HTTPException(404)
+    return FileResponse(p, media_type="image/jpeg")
+
+
+def _serve_site(slug: str, path: str, sandboxed: bool) -> Response:
+    s = sites.store.by_slug(slug)
+    f = sites.store.file(s, path) if s else None
+    if not f:
+        return Response("Not found", status_code=404, media_type="text/plain")
+    headers = {"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"}
+    if sandboxed:  # path form shares OpenManus' origin: run it as an opaque origin
+        headers["Content-Security-Policy"] = "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+    return FileResponse(f, media_type=sites.content_type(f), headers=headers)
+
+
+@app.get("/sites/{slug}/{path:path}")
+async def site_by_path(slug: str, path: str):
+    return _serve_site(slug, path, sandboxed=True)
+
+
+@app.middleware("http")
+async def site_hosts(request: Request, call_next):
+    """<slug>.<sites domain> serves that published site (its own origin, so storage and scripts work)."""
+    host, domain = request.headers.get("host", ""), sites.sites_domain()
+    if host.endswith("." + domain) and sites.store:
+        slug = host[: -len(domain) - 1]
+        if request.method not in ("GET", "HEAD"):
+            return Response("Method not allowed", status_code=405)
+        return _serve_site(slug, request.url.path, sandboxed=False)
+    return await call_next(request)
 
 
 @app.get("/api/library")

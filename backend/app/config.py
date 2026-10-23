@@ -61,6 +61,8 @@ CONFIRM_ENABLED = _bool("MANUS_CONFIRM", True)
 SUGGESTIONS_ENABLED = _bool("MANUS_SUGGESTIONS", True)
 # Send browser screenshots to the model as images (better grounding, more tokens).
 BROWSER_VISION = _bool("MANUS_BROWSER_VISION", True)
+# published sites are served at <slug>.<SITES_DOMAIN> (default: PUBLIC_BASE_URL's host, e.g. localhost:8000)
+SITES_DOMAIN = os.environ.get("MANUS_SITES_DOMAIN", "")
 # media generation through the gateway (empty = capability off)
 IMAGE_MODEL = os.environ.get("MANUS_IMAGE_MODEL", "")
 TTS_MODEL = os.environ.get("MANUS_TTS_MODEL", "")

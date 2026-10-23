@@ -528,6 +528,33 @@ async def web_extract(req: ExtractReq):
         await ctx.close()
 
 
+class ShotReq(BaseModel):
+    url: str  # http(s) URL or a sandbox path of an HTML file
+    width: int = 1280
+    height: int = 800
+    wait_ms: int = 1200
+
+
+@app.post("/web/screenshot")
+async def web_screenshot(req: ShotReq):
+    """A JPEG of a page in a separate headless tab (e.g. a cover image for a published site)."""
+    url = req.url if req.url.startswith(("http://", "https://", "file://")) else resolve(req.url).as_uri()
+    async with browser.launch_lock:
+        b = await browser.launch_background()
+    ctx = await b.new_context(viewport={"width": req.width, "height": req.height}, locale="zh-CN")
+    try:
+        page = await ctx.new_page()
+        try:
+            await page.goto(url, timeout=45000, wait_until="load")
+            await page.wait_for_timeout(req.wait_ms)
+            jpg = await page.screenshot(type="jpeg", quality=75)
+        except Exception as e:
+            raise HTTPException(400, f"{type(e).__name__}: {e}")
+        return {"image": base64.b64encode(jpg).decode(), "title": await page.title()}
+    finally:
+        await ctx.close()
+
+
 # ---------------------------------------------------------------- slides ---
 # An HTML deck is a page of <section class="slide"> elements designed at a fixed size (default
 # 1280x720). Export renders each slide on its own: PNG images (previews and the PPTX), a vector PDF
