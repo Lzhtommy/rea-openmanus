@@ -72,6 +72,15 @@ class Block(BaseModel):
 class Reply(BaseModel):
     content: list[Block]
     stop_reason: str  # end_turn | tool_use | max_tokens | refusal
+    usage: dict = {}  # {"input", "output", "cached"} tokens when the provider reports them
+
+
+def _usage(u) -> dict:
+    if not u:
+        return {}
+    details = getattr(u, "prompt_tokens_details", None)
+    return {"input": u.prompt_tokens or 0, "output": u.completion_tokens or 0,
+            "cached": (getattr(details, "cached_tokens", 0) or 0) if details else 0}
 
 
 _STOP = {"stop": "end_turn", "tool_calls": "tool_use", "function_call": "tool_use", "length": "max_tokens",
@@ -107,8 +116,10 @@ def _reply(resp) -> Reply:
     msg = choice.message
     extra = msg.model_extra or {}
     calls = [(tc.id, tc.function.name, tc.function.arguments) for tc in msg.tool_calls or []]
-    return _blocks(extra.get("thinking_blocks") or [], extra.get("reasoning_content") or "", msg.content or "",
-                   calls, choice.finish_reason)
+    r = _blocks(extra.get("thinking_blocks") or [], extra.get("reasoning_content") or "", msg.content or "",
+                calls, choice.finish_reason)
+    r.usage = _usage(getattr(resp, "usage", None))
+    return r
 
 
 # ------------------------------------------------------------- streaming ---
@@ -162,7 +173,10 @@ async def _accumulate(chunks: AsyncIterator, on_delta: Delta | None, text_id: st
             shown[stream_id] = text
             on_delta(stream_id, text)
 
+    usage = {}
     async for chunk in chunks:
+        if getattr(chunk, "usage", None):
+            usage = _usage(chunk.usage)
         if not chunk.choices:
             continue
         choice = chunk.choices[0]
@@ -190,7 +204,9 @@ async def _accumulate(chunks: AsyncIterator, on_delta: Delta | None, text_id: st
             if on_tool and c["id"] and c["name"]:  # Manus' toolUsed status "streaming": arguments still arriving
                 on_tool(c["id"], c["name"], c["args"])
     ordered = [(c["id"], c["name"], c["args"]) for _, c in sorted(calls.items())]
-    return _blocks(thinking, reasoning, content, ordered, finish)
+    r = _blocks(thinking, reasoning, content, ordered, finish)
+    r.usage = usage
+    return r
 
 
 # --------------------------------------------------------------- request ---
@@ -312,7 +328,7 @@ async def agent_step(messages: list[dict], effort: str, on_delta: Delta | None =
     kw = dict(messages=chat, tools=CHAT_TOOLS, tool_choice="auto", max_tokens=config.MAX_TOKENS, **_common(p, effort))
     if on_delta is None:
         return _reply(await client(p).chat.completions.create(**kw))
-    stream = await client(p).chat.completions.create(**kw, stream=True)
+    stream = await client(p).chat.completions.create(**kw, stream=True, stream_options={"include_usage": True})
     return await _accumulate(stream, on_delta, text_id, on_tool)
 
 

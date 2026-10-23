@@ -24,6 +24,13 @@ from .sandbox import manager
 log = logging.getLogger("manus.session")
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    """Write via a temp file and rename, so a reader (or a crash) never sees a half-written file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
+
 class Session(AgentHost):
     def __init__(self, sid: str, title: str = "New task", created_at: float | None = None):
         self.session_id = sid
@@ -34,7 +41,9 @@ class Session(AgentHost):
         self.messages: list[dict] = []
         self.plan: list[dict] = []
         self.inbox: list[str] = []
-        self.queued: list[str] = []  # requests sent with deliveryMode "queue": run one after another
+        self.queued: list[str] = []
+        # Manus' cascadeTaskClock: active time plus model usage, per task
+        self.usage: dict = {"activeMs": 0, "llmCalls": 0, "input": 0, "output": 0, "cached": 0, "toolCalls": 0, "models": {}}  # requests sent with deliveryMode "queue": run one after another
         self.confirm_next_plan = False
         self.plan_future: asyncio.Future | None = None
         self.pending_reply: asyncio.Future | None = None
@@ -84,16 +93,16 @@ class Session(AgentHost):
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
                 "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id, "triggerId": self.trigger_id, "computerId": self.computer_id, "deviceId": self.device_id, "agentId": self.agent_id, "teamId": self.team_id,
-                "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id}
+                "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id, "usage": self.usage}
 
     def persist(self) -> None:
-        (self.dir / "meta.json").write_text(json.dumps({**self.meta(), "envAnnounced": self.env_announced,
+        _atomic_write(self.dir / "meta.json", json.dumps({**self.meta(), "envAnnounced": self.env_announced,
                                                         "files": self.files, "share": self.share,
                                                         "mrCache": self.map_reduce_cache,
                                                         "projectAnnounced": self.project_announced,
                                                         "personalNote": self.personal_note, "skillsNote": self.skills_note,
-                                                        "roleAnnounced": self.role_announced}, ensure_ascii=False))
-        (self.dir / "messages.json").write_text(json.dumps(self.messages, ensure_ascii=False))
+                                                        "roleAnnounced": self.role_announced, "usage": self.usage}, ensure_ascii=False))
+        _atomic_write(self.dir / "messages.json", json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
     def load(cls, d: Path) -> "Session":
@@ -108,6 +117,7 @@ class Session(AgentHost):
         s.device_id = meta.get("deviceId")
         s.agent_id, s.team_id = meta.get("agentId"), meta.get("teamId")
         s.role_announced = meta.get("roleAnnounced", False)
+        s.usage = {**s.usage, **(meta.get("usage") or {})}
         s.model_selection = meta.get("model") or {}
         s.share = meta.get("share")
         s.project_id = meta.get("projectId")
@@ -245,6 +255,17 @@ class Session(AgentHost):
         return await sites.store.publish(sandbox, self.session_id, a["path"], a.get("title", ""), a.get("kind") or "website",
                                          a.get("description") or "")
 
+    def add_usage(self, model: str, usage: dict, tool_calls: int) -> None:
+        u = self.usage
+        u["llmCalls"] += 1
+        u["toolCalls"] += tool_calls
+        for k in ("input", "output", "cached"):
+            u[k] += int(usage.get(k) or 0)
+        m = u["models"].setdefault(model, {"calls": 0, "input": 0, "output": 0})
+        m["calls"] += 1
+        m["input"] += int(usage.get("input") or 0)
+        m["output"] += int(usage.get("output") or 0)
+
     def team_member(self, name: str) -> dict | None:
         if not agents_mod.store:
             return None
@@ -368,6 +389,7 @@ class Session(AgentHost):
         self.persist()
 
     async def _run(self, text: str) -> None:
+        run_started, wall = time.monotonic(), time.time()
         try:
             await self.emit({"type": "statusUpdate", "agentStatus": "running"})
             sandbox = await manager.get(self.sandbox_id)
@@ -459,12 +481,14 @@ class Session(AgentHost):
             if self.status not in ("error",):
                 await self.emit({"type": "statusUpdate", "agentStatus": "idle", "description": "Task completed"})
                 await self._suggest(text)
+                await self._promote(wall)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             log.exception("session %s crashed", self.session_id)
             await self.emit({"type": "statusUpdate", "agentStatus": "error", "description": f"{type(e).__name__}: {e}"})
         finally:
+            self.usage["activeMs"] += int((time.monotonic() - run_started) * 1000)
             self.persist()
             # A message that arrived after the agent's last turn starts a new run.
             if self.inbox and self.status != "stopped":
@@ -473,6 +497,28 @@ class Session(AgentHost):
             elif self.queued and self.status != "stopped":  # Manus' deliveryMode "queue": next request after this one
                 self.task = asyncio.create_task(self._run(self.queued.pop(0)))
 
+
+    # Manus' fileOperationPromotion: after a delivery, offer the natural next step for a delivered file.
+    PROMOTIONS = [
+        (("md", "docx", "pdf", "txt"), [("做成网页", "把 {name} 的内容做成一个排版精美的单页网站，并发布出来"),
+                                        ("做成幻灯片", "把 {name} 的内容做成一份幻灯片，并导出 PDF 和 PPTX")]),
+        (("csv", "xlsx", "xls", "json"), [("做成数据看板", "用 {name} 里的数据做一个可交互的数据看板网页，并发布出来"),
+                                          ("生成分析报告", "分析 {name} 的数据，写一份带图表的分析报告")]),
+        (("html",), [("发布为网站", "把 {path} 所在的网站发布成正式站点")]),
+        (("png", "jpg", "jpeg", "webp"), [("做成海报", "以 {name} 为主视觉，设计一张宣传海报")]),
+        (("pptx",), [("写演讲稿", "为 {name} 每一页写一段演讲稿，汇总成一个文档")]),
+    ]
+
+    async def _promote(self, since: float) -> None:
+        delivered = [f for f in self.files.values() if "deliverable" in f["kinds"] and f["updatedAt"] >= since - 1]
+        for f in delivered[:2]:
+            ext = f["filename"].rsplit(".", 1)[-1].lower() if "." in f["filename"] else ""
+            for exts, offers in self.PROMOTIONS:
+                if ext in exts:
+                    for label, prompt in offers:
+                        await self.emit({"type": "fileOperationPromotion", "filePath": f["path"], "suggestion": label,
+                                         "promptForAI": prompt.format(name=f["filename"], path=f["path"])})
+                    break
 
     async def _suggest(self, request: str) -> None:
         """Offer follow-up requests as a `suggestion` step, like Manus does after delivery."""

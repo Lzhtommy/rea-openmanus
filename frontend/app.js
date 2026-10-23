@@ -249,11 +249,14 @@ function apply(ev) {
         S.dirty.add(t);
       }
       if (ev.agentStatus !== "running") S.live = "";
+      if (!S.replaying && document.hidden && store.get("notify", "0") === "1" && window.Notification?.permission === "granted" && ["idle", "waiting", "error"].includes(ev.agentStatus))
+        new Notification(S.title || "OpenManus", { body: { idle: "任务已完成", waiting: "OpenManus 需要你的回复或确认", error: "任务出错" }[ev.agentStatus], tag: S.current });
       if (!S.replaying) refreshSessions();
       break;
     }
     case "liveStatus": S.live = ev.text || ""; if (activeTurn()) S.dirty.add(activeTurn()); break;
     case "planUpdate": S.plan = ev.tasks || []; break;
+    case "fileOperationPromotion": { const t = activeTurn(); if (t) { (t.promos ||= []).push(ev); S.dirty.add(t); } break; }
     case "planConfirm": { const t = ensureTurn(ev.timestamp); t.planConfirm = ev.tasks || []; S.dirty.add(t); break; }
     case "planConfirmed": { const t = lastTurn(); if (t) { t.planConfirm = null; S.dirty.add(t); } break; }
     case "title": S.title = ev.title; refreshSessions(); break;
@@ -381,6 +384,7 @@ function renderTurn(t) {
       `<div class="cc-actions"><button class="btn ghost" data-act="plan-confirm" data-turn="${t.id}" data-ok="0">取消任务</button><button class="btn primary" data-act="plan-confirm" data-turn="${t.id}" data-ok="1">开始执行</button></div></div>`;
     h += S.steps.filter((s) => s.turn === t && s.detail?.knowledge && s.status === "success").map((s) => knowCardHtml(s.detail.knowledge)).join("");
     if (finalItems.length) h += `<div class="final">${finalItems.map((it) => (it.kind === "chat" ? chatHtml(it.ev, true) : itemHtml(t, it, false))).join("")}</div>`;
+    if (isFinished(t) && t.promos?.length && isLast && !S.readonly) h += `<div class="promos">${t.promos.map((p, i) => `<button class="promo" data-act="promo" data-turn="${t.id}" data-i="${i}">${icon("spark")}${esc(p.suggestion)}<span>${esc(basename(p.filePath))}</span></button>`).join("")}</div>`;
     if (isFinished(t)) h += doneRowHtml(t, fi);
     if (t.suggestions?.length && isLast) h += `<div class="suggestions">${t.suggestions.map((c, i) =>
       `<button class="suggestion" data-act="suggest" data-turn="${t.id}" data-i="${i}">${icon("message")}<span>${esc(c.content)}</span>${icon("arrowRight")}</button>`).join("")}</div>`;
@@ -1958,6 +1962,36 @@ function renderAttachments() {
   $("#attach-list").innerHTML = (S.crew ? `<span class="chip-file target">${icon("users")}<span>与「${esc(crewName())}」一起</span><button type="button" data-rmcrew="1">${icon("x")}</button></span>` : "") + (pc ? `<span class="chip-file target">${icon(S.target.startsWith("dev:") ? "laptop" : "monitor")}<span>在「${esc(pc.name)}」上运行</span><button type="button" data-rmtarget="1">${icon("x")}</button></span>` : "") + S.pickedSkills.map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span><button type="button" data-rmskill="${esc(n)}">${icon("x")}</button></span>`).join("") + S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
 }
 
+// ------------------------------------------------------------------ settings (设置) ---
+const SET_TABS = [["general", "通用", "sun"], ["usage", "用量", "chart"], ["shortcuts", "快捷键", "list"], ["personal", "个性化", "user"], ["skills", "技能", "spark"], ["plugins", "插件与连接器", "puzzle"]];
+const fmtNum = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n || 0));
+async function openSettings(tab = "general") {
+  if (["personal", "skills", "plugins"].includes(tab)) { $("#settings-modal").classList.add("hidden"); return tab === "personal" ? openPersonal() : tab === "skills" ? openSkills("mine") : openPlugins(); }
+  S.setTab = tab;
+  $("#set-tabs").innerHTML = SET_TABS.map(([k, l, ic]) => `<button class="set-tab ${k === tab ? "on" : ""}" data-set="${k}">${icon(ic)}${l}</button>`).join("");
+  $("#set-h").textContent = SET_TABS.find((x) => x[0] === tab)[1];
+  $("#settings-modal").classList.remove("hidden");
+  const body = $("#set-body");
+  if (tab === "general") {
+    const notify = store.get("notify", "0") === "1";
+    body.innerHTML = `<div class="set-row"><div><b>外观</b><div class="muted">浅色、深色或跟随系统</div></div><select id="set-theme">${[["auto", "跟随系统"], ["light", "浅色"], ["dark", "深色"]].map(([v, l]) => `<option value="${v}" ${store.get("theme", "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>` +
+      `<div class="set-row"><div><b>桌面通知</b><div class="muted">页面在后台时，任务完成、需要你回复或确认时提醒你</div></div><button class="switch ${notify ? "on" : ""}" id="set-notify"><i></i></button></div>` +
+      `<div class="set-row"><div><b>默认模式</b><div class="muted">新任务默认使用的模式，可在顶栏随时切换</div></div><span>${esc(selLabel(defaultSel()))}</span></div>`;
+  } else if (tab === "shortcuts") {
+    body.innerHTML = [["⌘ / Ctrl + K", "新建任务"], ["Enter", "发送消息"], ["Shift + Enter", "换行"], ["Esc", "关闭预览 / 退出全屏"], ["← →", "在幻灯片查看器中翻页（幻灯片文件内）"]]
+      .map(([k, d]) => `<div class="set-row"><span>${esc(d)}</span><kbd class="kbd">${esc(k)}</kbd></div>`).join("");
+  } else {
+    body.innerHTML = `<div class="pc-empty" style="height:200px"><span class="shimmer">加载中</span></div>`;
+    const u = await (await fetch("/api/usage")).json(), t = u.total;
+    const stat = (n, l) => `<div class="stat-tile"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+    body.innerHTML = `<div class="stat-grid">${stat(t.tasks, "任务")}${stat(fmtDur(t.activeMs), "运行时长")}${stat(fmtNum(t.llmCalls), "模型调用")}${stat(fmtNum(t.toolCalls), "工具调用")}${stat(fmtNum(t.input), "输入 tokens")}${stat(fmtNum(t.output), "输出 tokens")}</div>` +
+      `<div class="muted" style="font-size:12px;margin:-4px 0 12px">其中 ${fmtNum(t.cached)} 个输入 tokens 命中缓存（${t.input ? Math.round(t.cached / t.input * 100) : 0}%）。</div>` +
+      `<div class="mcp-label">按模型</div><table class="u-table"><tr><th>模型</th><th>调用</th><th>输入</th><th>输出</th></tr>${u.models.map((m) => `<tr><td>${esc(m.model)}</td><td>${fmtNum(m.calls)}</td><td>${fmtNum(m.input)}</td><td>${fmtNum(m.output)}</td></tr>`).join("")}</table>` +
+      `<div class="mcp-label">按日期</div><table class="u-table"><tr><th>日期</th><th>任务</th><th>运行时长</th><th>输入</th><th>输出</th></tr>${u.days.map((d) => `<tr><td>${esc(d.day)}</td><td>${d.tasks}</td><td>${fmtDur(d.activeMs)}</td><td>${fmtNum(d.input)}</td><td>${fmtNum(d.output)}</td></tr>`).join("")}</table>` +
+      `<div class="mcp-label">用量最多的任务</div><table class="u-table"><tr><th>任务</th><th>时长</th><th>tokens</th></tr>${u.tasks.map((x) => `<tr><td><a href="#${esc(x.id)}" data-set-goto="${esc(x.id)}">${esc(x.title)}</a></td><td>${fmtDur(x.activeMs)}</td><td>${fmtNum(x.input + x.output)}</td></tr>`).join("")}</table>`;
+  }
+}
+
 // ------------------------------------------------------------------ theme ---
 const THEMES = ["auto", "light", "dark"];
 function applyTheme(t) {
@@ -2237,6 +2271,17 @@ function bind() {
   $("#nav-expand").onclick = () => collapse(false);
   $("#search-btn").onclick = () => { const n = $("#nav-search"); n.classList.toggle("hidden"); if (!n.classList.contains("hidden")) $("#search-input").focus(); else { S.filter = ""; $("#search-input").value = ""; renderSessions(); } };
   $("#search-input").oninput = (e) => { S.filter = e.target.value; renderSessions(); };
+  $(".me").onclick = () => openSettings();
+  $("#set-close").onclick = () => $("#settings-modal").classList.add("hidden");
+  $("#set-tabs").onclick = (e) => { const b = e.target.closest("[data-set]"); if (b) openSettings(b.dataset.set); };
+  $("#set-body").addEventListener("change", (e) => { if (e.target.id === "set-theme") { store.set("theme", e.target.value); applyTheme(e.target.value); } });
+  $("#set-body").addEventListener("click", async (e) => {
+    const g = e.target.closest("[data-set-goto]"); if (g) { e.preventDefault(); $("#settings-modal").classList.add("hidden"); openSession(g.dataset.setGoto); return; }
+    const n = e.target.closest("#set-notify"); if (!n) return;
+    const on = store.get("notify", "0") !== "1";
+    if (on && window.Notification && Notification.permission !== "granted") { if ((await Notification.requestPermission()) !== "granted") return; }
+    store.set("notify", on ? "1" : "0"); openSettings("general");
+  });
   $("#theme-btn").onclick = () => { const cur = store.get("theme", "auto"); const next = THEMES[(THEMES.indexOf(cur) + 1) % 3]; store.set("theme", next); applyTheme(next); };
   $("#share-btn").onclick = openShareDialog;
   $("#share-close").onclick = () => $("#share-modal").classList.add("hidden");
@@ -2279,6 +2324,7 @@ function bind() {
       case "toggle-group": { const it = t.items.find((x) => x.id === a.dataset.group); const isCur = !isFinished(t) && it === t.items[t.items.length - 1]; t.groupOpen[a.dataset.group] = !(t.groupOpen[a.dataset.group] ?? isCur); rerender(t); break; }
       case "step": S.panel.open = true; S.panel.userClosed = false; S.panel.file = null; S.panel.sel = a.dataset.id === S.steps[S.steps.length - 1]?.actionId ? null : a.dataset.id; refreshSel(); break;
       case "suggest": if (!S.readonly) submit(t.suggestions[+a.dataset.i].content); break;
+      case "promo": if (!S.readonly) submit(t.promos[+a.dataset.i].promptForAI); break;
       case "copy": { const fi = finalIndex(t); if (fi >= 0) navigator.clipboard?.writeText(t.items.slice(fi).filter((x) => x.kind === "chat").map((x) => x.ev.content).join("\n\n")); break; }
       case "open-file": if (e.target.closest("a[download]")) return; S.panel.open = true; S.panel.userClosed = false; S.panel.file = { url: a.dataset.url, name: a.dataset.name, path: a.dataset.path }; refreshSel(); break;
       case "plan": e.stopPropagation(); S.planOpen = !S.planOpen; renderTaskbar(); return;

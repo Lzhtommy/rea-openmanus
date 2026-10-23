@@ -1020,3 +1020,26 @@ async def test_plan_confirm_and_queue(store, monkeypatch):
         await asyncio.sleep(0.05)
     await wait_status(s, {"idle"})
     assert any("只做第一步" in str(m["content"]) for m in s.messages if m["role"] == "system")
+
+
+@pytest.mark.asyncio
+async def test_usage_and_promotions(store, monkeypatch):
+    """Model usage and active time add up per task; a delivered report gets follow-up promotions."""
+    from app import main
+    reply = msg(tool("file_write", file="report.md", content="# 报告"))
+    reply.usage = {"input": 1200, "output": 300, "cached": 1000}
+    model = ScriptedModel([reply, msg(tool("message_notify_user", text="完成", attachments=["report.md"], kind="result")),
+                           msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("写个报告", [])
+    await wait_status(s, {"idle"})
+    for _ in range(50):
+        if any(e["type"] == "fileOperationPromotion" for e in s.events):
+            break
+        await asyncio.sleep(0.05)
+    assert s.usage["llmCalls"] == 3 and s.usage["input"] == 1200 and s.usage["cached"] == 1000 and s.usage["activeMs"] > 0
+    promos = [e for e in s.events if e["type"] == "fileOperationPromotion"]
+    assert {p["suggestion"] for p in promos} == {"做成网页", "做成幻灯片"} and "report.md" in promos[0]["promptForAI"]
+    u = await main.usage()
+    assert u["total"]["input"] >= 1200 and any(t["id"] == s.session_id for t in u["tasks"])

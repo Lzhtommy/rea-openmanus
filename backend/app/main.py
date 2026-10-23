@@ -1055,6 +1055,32 @@ async def site_hosts(request: Request, call_next):
     return await call_next(request)
 
 
+@app.get("/api/usage")
+async def usage():
+    """用量: model calls, tokens, tool calls and active time, overall, per day, per model and per task."""
+    from datetime import datetime
+    keys = ("activeMs", "llmCalls", "input", "output", "cached", "toolCalls")
+    total, days, models, tasks = dict.fromkeys(keys, 0), {}, {}, []
+    for s in session_mod.store.sessions.values():
+        u = s.usage
+        day = datetime.fromtimestamp(s.created_at).strftime("%Y-%m-%d")
+        d = days.setdefault(day, dict.fromkeys(keys, 0) | {"tasks": 0})
+        d["tasks"] += 1
+        for k in keys:
+            total[k] += u.get(k, 0)
+            d[k] += u.get(k, 0)
+        for name, m in (u.get("models") or {}).items():
+            mm = models.setdefault(name, {"calls": 0, "input": 0, "output": 0})
+            for k in mm:
+                mm[k] += m.get(k, 0)
+        if u.get("llmCalls"):
+            tasks.append({"id": s.session_id, "title": s.title, "createdAt": s.created_at, **{k: u.get(k, 0) for k in keys}})
+    return {"total": {**total, "tasks": len(session_mod.store.sessions)},
+            "days": [{"day": k, **v} for k, v in sorted(days.items(), reverse=True)][:30],
+            "models": [{"model": k, **v} for k, v in sorted(models.items(), key=lambda x: -x[1]["calls"])],
+            "tasks": sorted(tasks, key=lambda t: -(t["input"] + t["output"]))[:20]}
+
+
 @app.get("/api/library")
 async def library():
     """Every kept file across tasks, newest first (Manus' 资料库)."""

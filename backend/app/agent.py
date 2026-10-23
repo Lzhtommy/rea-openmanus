@@ -73,6 +73,7 @@ class AgentHost:
     def skill_used(self, name: str) -> None: ...
     def preview_url(self, port: int) -> str: return ""
     def persist(self) -> None: ...
+    def add_usage(self, model: str, usage: dict, tool_calls: int) -> None: ...
 
 
 class Agent:
@@ -118,6 +119,7 @@ class Agent:
                 return
 
             tool_uses = [b for b in resp.content if b.type == "tool_use"]
+            self.host.add_usage(self.profile.model, resp.usage, len(tool_uses))
 
             if resp.stop_reason == "max_tokens":
                 # Never run truncated tool input. Drop the partial turn and ask for smaller steps.
