@@ -622,3 +622,13 @@ textarea.code-edit { font: 13px/20px var(--font-mono); min-height: 52vh; }
 .trig-ev summary { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; list-style: none; }
 .trig-ev summary svg.i { width: 12px; height: 12px; }
 .trig-ev pre { text-align: left; white-space: pre-wrap; font: 12px/18px var(--font-mono); background: var(--fill-light); border-radius: 10px; padding: 8px 12px; margin: 6px 0 0; max-height: 240px; overflow: auto; }
+
+/* ---- plugins (插件) */
+#plugins { flex: 1; min-height: 0; overflow-y: auto; }
+.plug-logo { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 16px; flex: none; }
+.plug-card .sk-desc { min-height: 40px; -webkit-line-clamp: 2; }
+.plug-card .conn-st { flex: none; font-size: 12px; }
+#plug-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+#plug-modal .viewer-head { gap: 10px; }
+.back-btn { margin: 0 4px 0 -8px; vertical-align: middle; }
+.lib-head h2 { display: flex; align-items: center; }

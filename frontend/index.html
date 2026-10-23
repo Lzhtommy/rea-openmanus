@@ -22,7 +22,7 @@
       <div class="nav-body">
         <button class="nav-item" id="new-task"><span class="nav-ico" data-icon="newTask"></span><span class="nav-label">新建任务</span><kbd>⌘K</kbd></button>
         <button class="nav-item" id="nav-auto"><span class="nav-ico" data-icon="clock"></span><span class="nav-label">自动化</span></button>
-        <button class="nav-item" id="nav-conn"><span class="nav-ico" data-icon="plug"></span><span class="nav-label">连接器</span></button>
+        <button class="nav-item" id="nav-conn"><span class="nav-ico" data-icon="puzzle"></span><span class="nav-label">插件</span></button>
         <button class="nav-item" id="nav-library"><span class="nav-ico" data-icon="library"></span><span class="nav-label">资料库</span></button>
         <div class="more-wrap"><button class="nav-item" id="nav-more"><span class="nav-ico" data-icon="more"></span><span class="nav-label">更多</span></button>
           <div class="more-menu hidden" id="more-menu">
@@ -98,9 +98,18 @@
         </div>
       </div>
 
+      <div id="plugins" class="hidden">
+        <div class="lib-inner wide">
+          <div class="lib-head"><h2>插件</h2><div class="head-btns"><button class="btn ghost" id="plug-manage">管理连接器</button><button class="btn primary" id="plug-create">创建</button></div></div>
+          <p class="auto-intro">把常用的服务接入 OpenManus。连接后，Agent 会在需要时搜索并调用这些服务提供的工具；有写入操作的工具调用前会请你确认。</p>
+          <div class="lib-tabs" id="plug-cats"></div>
+          <div id="plug-list" class="sk-grid"></div>
+        </div>
+      </div>
+
       <div id="connectors" class="hidden">
         <div class="lib-inner">
-          <div class="lib-head"><h2>连接器</h2><button class="btn primary" id="conn-new">添加连接器</button></div>
+          <div class="lib-head"><h2><button class="icon-btn back-btn" id="conn-back" title="返回插件" data-icon="chevLeft"></button>连接器</h2><button class="btn primary" id="conn-new">添加自定义连接器</button></div>
           <p class="auto-intro">通过 MCP 把外部工具和数据接入 OpenManus。Agent 会按需搜索并调用这些工具；未标记为只读的工具在调用前会请你确认。</p>
           <div id="conn-list"></div>
         </div>
@@ -251,6 +260,14 @@
       <label>模型<input name="model" list="flex-models" placeholder="连接后从列表中选择，或直接填写" /><datalist id="flex-models"></datalist></label>
       <div class="sched-err" id="flex-err"></div>
       <div class="flex-actions"><button type="button" class="btn ghost" id="flex-remove">移除</button><span class="spacer"></span><button type="button" class="btn ghost" id="flex-cancel">取消</button><button type="submit" class="btn primary" id="flex-connect">连接</button></div>
+    </form>
+  </div>
+
+  <div id="plug-modal" class="hidden">
+    <form class="sched-card" id="plug-form" autocomplete="off">
+      <div class="viewer-head"><span class="plug-logo" id="plug-m-logo"></span><div class="viewer-title"><div id="plug-m-name" style="font-size:16px;font-weight:500"></div><div id="plug-m-sub" class="muted" style="font-size:12px"></div></div><button type="button" class="icon-btn" id="plug-close" data-icon="x"></button></div>
+      <div class="sched-body" id="plug-m-body"></div>
+      <div class="cc-actions"><button type="button" class="btn ghost danger hidden" id="plug-remove">断开</button><span class="spacer"></span><button type="button" class="btn ghost" id="plug-cancel">取消</button><button type="submit" class="btn primary" id="plug-connect">连接</button></div>
     </form>
   </div>
 

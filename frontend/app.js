@@ -60,6 +60,8 @@ const ICONS = {
   spark: '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
   github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.1-1.3-.3-2.5-1-3.5.3-1.2.3-2.4 0-3.5 0 0-1 0-3 1.5-2.6-.5-5.4-.5-8 0C6 2 5 2 5 2c-.3 1.1-.3 2.3 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.4.5-.7 1-.8 1.6-.2.6-.3 1.3-.2 1.9v4"/><path d="M9 18c-4.5 2-5-2-7-2"/>',
+  puzzle: '<path d="M19.4 11H18V7a2 2 0 0 0-2-2h-4V3.6a2.1 2.1 0 1 0-4 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.7 2.7 0 0 1 0 5.4H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.7 2.7 0 0 1 5.4 0V22H17a2 2 0 0 0 2-2v-4h1.4a2.5 2.5 0 0 0 0-5z"/>',
+  chevLeft: '<path d="m15 18-6-6 6-6"/>',
   zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
   webhook: '<path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"/><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"/>',
   book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
@@ -127,6 +129,7 @@ const S = {
   vnc: false, vncFailed: false,
   attachments: [], previews: {},
   personal: { profile: {}, instructions: "", knowledge: [] }, persTab: "profile", editingKnow: null,
+  plugins: { plugins: [], categories: [] }, plugCat: "all", plugOpen: null,
   triggers: [], activity: [], autoTab: "activity", editingTrig: null,
   skills: { skills: [], catalog: [], categories: [] }, skTab: "explore", skCat: "all", skSrc: "all", pickedSkills: [], skillView: null,
 };
@@ -248,9 +251,10 @@ function scheduleRender(scrollEnd = false) {
 }
 
 function renderAll() {
-  const auto = S.view === "automations", conn = S.view === "connectors";
+  const auto = S.view === "automations", conn = S.view === "connectors", plug = S.view === "plugins";
   const proj = S.view === "project", pers = S.view === "personal", sk = S.view === "skills";
-  const lib = S.view === "library" || auto || conn || proj || pers || sk; // full-page views without a composer dock
+  const lib = S.view === "library" || auto || conn || proj || pers || sk || plug; // full-page views without a composer dock
+  $("#plugins").classList.toggle("hidden", !plug);
   $("#personal").classList.toggle("hidden", !pers);
   $("#skills").classList.toggle("hidden", !sk);
   $("#nav-more").classList.toggle("active", pers || sk);
@@ -260,14 +264,14 @@ function renderAll() {
   $("#library").classList.toggle("hidden", S.view !== "library");
   $("#automations").classList.toggle("hidden", !auto);
   $("#connectors").classList.toggle("hidden", !conn);
-  $("#nav-conn").classList.toggle("active", conn);
+  $("#nav-conn").classList.toggle("active", conn || plug);
   $("#nav-auto").classList.toggle("active", auto);
   $("#scroller").classList.toggle("hidden", home || lib);
   $("#dock").classList.toggle("hidden", home || lib);
   $("#nav-library").classList.toggle("active", S.view === "library");
   (proj ? $("#proj-slot") : home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  $("#composer").classList.toggle("hidden", pers || sk);
-  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : sk ? "技能" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  $("#composer").classList.toggle("hidden", pers || sk || plug || conn);
+  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : sk ? "技能" : plug ? "插件" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   renderModeButton();
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
@@ -275,6 +279,7 @@ function renderAll() {
   $("#panel-btn").classList.toggle("hidden", home || lib || !S.steps.length || S.panel.open);
   if (auto) { renderAutomations(); renderPanel(); return; }
   if (conn) { renderConnectors(); renderPanel(); return; }
+  if (plug) { renderPlugins(); renderPanel(); return; }
   if (proj) { renderProject(); renderPanel(); return; }
   if (pers) { renderPersonal(); renderPanel(); return; }
   if (sk) { renderSkills(); renderPanel(); return; }
@@ -803,7 +808,7 @@ async function saveConn(e) {
   if (!r.ok) { $("#conn-err").textContent = j.detail || "保存失败"; return; }
   if (j.status === "error") { $("#conn-err").textContent = `已保存，但连接失败：${j.error}`; S.editingConn = j; loadConns(); return; }
   $("#conn-modal").classList.add("hidden");
-  loadConns();
+  if (S.view === "plugins") openConnectors(); else loadConns();
 }
 async function connAction(a, id) {
   const c = S.conns.find((x) => x.id === id);
@@ -813,6 +818,58 @@ async function connAction(a, id) {
   if (a === "toggle") await fetch(`/api/connectors/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !c.enabled }) });
   if (a === "restart") { c.status = "connecting"; renderConnectors(); await fetch(`/api/connectors/${id}/restart`, { method: "POST" }); }
   loadConns();
+}
+
+// ------------------------------------------------------------------ plugins (插件) ---
+async function openPlugins() {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "plugins";
+  history.replaceState(null, "", "#plugins");
+  renderSessions(); await loadPlugins();
+}
+async function loadPlugins() { try { S.plugins = await (await fetch("/api/plugins")).json(); } catch { /* keep */ } scheduleRender(); }
+const plugLogo = (p) => `<span class="plug-logo" style="background:${esc(p.color)}">${esc(p.name.replace(/^[^\p{L}\p{N}]+/u, "").slice(0, 1).toUpperCase())}</span>`;
+function plugState(p) {
+  const c = p.connector;
+  if (!c) return `<button class="btn ghost sm" data-plug="${esc(p.id)}">${icon("plus")}连接</button>`;
+  const [cls, label] = c.status === "connected" ? ["ok", "已连接"] : c.status === "error" ? ["err", "连接失败"] : !c.enabled ? ["", "已停用"] : ["", "连接中"];
+  return `<span class="conn-st ${cls}" title="${c.status === "connected" ? `${c.tools} 个工具` : ""}"><i></i>${label}</span>`;
+}
+function renderPlugins() {
+  const { plugins, categories } = S.plugins;
+  $("#plug-cats").innerHTML = [["all", "全部"], ["installed", "已连接"], ...categories.map((c) => [c, c])].map(([k, l]) => `<button class="lib-tab ${S.plugCat === k ? "on" : ""}" data-plugcat="${esc(k)}">${l}</button>`).join("");
+  const rows = plugins.filter((p) => S.plugCat === "all" || (S.plugCat === "installed" ? p.connector : p.category === S.plugCat));
+  $("#plug-list").innerHTML = rows.map((p) => `<div class="sk-card plug-card" data-plug="${esc(p.id)}"><div class="sk-top">${plugLogo(p)}<div class="sk-title">${esc(p.name)}<div class="sk-name">${esc(p.category)} · ${p.transport === "stdio" ? "本地运行" : "远程服务"}${p.fields.some((f) => f.required) ? "" : " · 免密钥"}</div></div>${plugState(p)}</div><div class="sk-desc">${esc(p.description)}</div></div>`).join("")
+    || `<div class="lib-empty">${icon("puzzle")}<div>还没有已连接的插件</div></div>`;
+}
+function openPlugin(id) {
+  const p = S.plugins.plugins.find((x) => x.id === id); if (!p) return;
+  S.plugOpen = p;
+  $("#plug-m-logo").outerHTML = plugLogo(p).replace('class="plug-logo"', 'class="plug-logo" id="plug-m-logo"');
+  $("#plug-m-name").textContent = p.name;
+  $("#plug-m-sub").innerHTML = `${esc(p.category)} · ${p.transport === "stdio" ? "在 OpenManus 服务器上运行" : "远程 MCP 服务"} · <a href="${esc(p.docs)}" target="_blank">文档</a>`;
+  const c = p.connector;
+  $("#plug-m-body").innerHTML = `<div class="sk-desc full">${esc(p.description)}</div>` +
+    (c ? `<div class="check-row ${c.status === "connected" ? "met" : ""}">${plugState(p)}${c.status === "error" ? `<span class="muted">可在「管理连接器」中查看错误详情</span>` : ""}</div>` : "") +
+    p.fields.map((f) => `<label>${esc(f.label)}<input name="${esc(f.key)}" type="${f.secret ? "password" : "text"}" placeholder="${esc(c && f.secret ? "已保存，留空则需重新填写" : f.placeholder)}" ${f.required ? "required" : ""} />${f.help ? `<span class="muted" style="font-size:12px">${esc(f.help)}</span>` : ""}</label>`).join("") +
+    (p.fields.length ? "" : `<div class="muted" style="font-size:13px">无需配置，点击「连接」即可使用。</div>`) +
+    `<div class="sched-err" id="plug-err"></div>`;
+  $("#plug-connect").textContent = c ? "重新连接" : "连接";
+  $("#plug-remove").classList.toggle("hidden", !c);
+  $("#plug-modal").classList.remove("hidden");
+}
+async function connectPlugin(e) {
+  e.preventDefault();
+  const p = S.plugOpen, btn = $("#plug-connect");
+  const values = Object.fromEntries(p.fields.map((f) => [f.key, e.target[f.key].value]));
+  btn.disabled = true; btn.innerHTML = `<span class="spin">${icon("loader")}</span>连接中`; $("#plug-err").textContent = "";
+  const r = await fetch(`/api/plugins/${p.id}/install`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ values }) });
+  btn.disabled = false; btn.textContent = "连接";
+  const j = await r.json().catch(() => ({}));
+  await loadPlugins();
+  if (!r.ok) { $("#plug-err").textContent = j.detail || "连接失败"; return; }
+  if (j.status === "error") { openPlugin(p.id); $("#plug-err").textContent = `已保存，但连接失败：${j.error}`; return; }
+  $("#plug-modal").classList.add("hidden");
 }
 
 // ------------------------------------------------------------------ share (read-only replay) ---
@@ -1528,7 +1585,18 @@ function bind() {
     if (e.target.closest("#replay-btn")) replayShare();
     if (e.target.closest("#share-bar-copy")) navigator.clipboard?.writeText(location.href).then(() => (e.target.closest("button").lastChild.textContent = "已复制"));
   });
-  $("#nav-conn").onclick = openConnectors;
+  $("#nav-conn").onclick = openPlugins;
+  $("#conn-back").onclick = openPlugins;
+  $("#plug-manage").onclick = openConnectors;
+  $("#plug-create").onclick = () => openConnForm(null);
+  $("#plug-cats").onclick = (e) => { const b = e.target.closest("[data-plugcat]"); if (b) { S.plugCat = b.dataset.plugcat; renderPlugins(); } };
+  $("#plug-list").onclick = (e) => { const b = e.target.closest("[data-plug]"); if (b) openPlugin(b.dataset.plug); };
+  $("#plug-form").onsubmit = connectPlugin;
+  $("#plug-close").onclick = $("#plug-cancel").onclick = () => $("#plug-modal").classList.add("hidden");
+  $("#plug-remove").onclick = async () => {
+    const c = S.plugOpen?.connector; if (!c || !confirm(`断开「${S.plugOpen.name}」并删除其配置？`)) return;
+    await fetch(`/api/connectors/${c.id}`, { method: "DELETE" }); $("#plug-modal").classList.add("hidden"); loadPlugins();
+  };
   $("#new-project").onclick = async () => {
     const name = prompt("项目名称"); if (!name?.trim()) return;
     const r = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
@@ -1781,6 +1849,7 @@ async function deleteSession(sid) {
   if (sid === "library") openLibrary();
   else if (sid === "automations") openAutomations();
   else if (sid === "connectors") openConnectors();
+  else if (sid === "plugins") openPlugins();
   else if (sid === "personal") openPersonal();
   else if (sid === "skills") openSkills();
   else if (sid.startsWith("project/")) openProject(sid.slice(8));
@@ -1790,7 +1859,7 @@ async function deleteSession(sid) {
   window.addEventListener("hashchange", () => {
     const h = location.hash.slice(1);
     if (S.readonly || h === (S.current || "") || (h === S.view && !S.current)) return;
-    if (h === "library") openLibrary(); else if (h === "automations") openAutomations(); else if (h === "connectors") openConnectors();
+    if (h === "library") openLibrary(); else if (h === "automations") openAutomations(); else if (h === "connectors") openConnectors(); else if (h === "plugins") openPlugins();
     else if (h === "personal") openPersonal(); else if (h === "skills") openSkills();
     else if (h.startsWith("project/")) openProject(h.slice(8));
     else if (!h || S.sessions.some((s) => s.id === h)) openSession(h || null);

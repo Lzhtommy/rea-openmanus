@@ -26,6 +26,14 @@ log = logging.getLogger("manus.connectors")
 TRANSPORTS = ("stdio", "http", "sse")
 
 
+_URL_SECRET = re.compile(r"((?:api[_-]?key|key|token|ak|secret|[a-z]+ApiKey)=)[^&#]+", re.I)
+
+
+def mask_url(url: str) -> str:
+    """Keys passed in a query string (e.g. ?key=...) are secrets too."""
+    return _URL_SECRET.sub(r"\1••••", url or "")
+
+
 def slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:24] or "server"
 
@@ -79,6 +87,8 @@ class Live:
                 self._ready.set()
                 await self._stop.wait()
         except Exception as e:  # noqa: BLE001 — any failure is shown on the connector card
+            while isinstance(e, BaseExceptionGroup) and e.exceptions:  # anyio task groups wrap the real cause
+                e = e.exceptions[0]
             self.error = f"{type(e).__name__}: {e}"[:300]
             self.status = "error"
             log.warning("connector %s: %s", self.cfg.get("name"), self.error)
@@ -130,7 +140,8 @@ class Connectors:
             raise ValueError("请填写名称")
         c = {"id": (prev or {}).get("id") or uuid.uuid4().hex[:10], "name": name, "transport": t,
              "description": (body.get("description") or "").strip(), "enabled": bool(body.get("enabled", True)),
-             "autoApprove": bool(body.get("autoApprove", False))}
+             "autoApprove": bool(body.get("autoApprove", False)),
+             "plugin": body.get("plugin") or (prev or {}).get("plugin")}  # catalog entry it was installed from
         if t == "stdio":
             if not (body.get("command") or "").strip():
                 raise ValueError("请填写启动命令")
@@ -140,13 +151,19 @@ class Connectors:
             if not str(body.get("url") or "").startswith(("http://", "https://")):
                 raise ValueError("请填写 http(s) 地址")
             c["url"], c["headers"] = body["url"].strip(), {str(k): str(v) for k, v in (body.get("headers") or {}).items()}
-        c["slug"] = slug(name)
+        base = slug(c["plugin"] or name)
+        if base == "server":  # names without ASCII letters (e.g. 中文) need a distinct prefix
+            base = f"mcp_{c['id'][:6]}"
+        taken = {x["slug"] for x in self.items.values() if x["id"] != c["id"]}
+        c["slug"] = base if base not in taken else f"{base}_{c['id'][:4]}"
         return c
 
     def public(self, c: dict) -> dict:
         lv = self.live.get(c["id"])
         secret = lambda d: {k: "••••" for k in d}  # noqa: E731 — env values / headers can be tokens
         out = {k: v for k, v in c.items() if k not in ("env", "headers")}
+        if c.get("url"):
+            out["url"] = mask_url(c["url"])
         out.update(env=secret(c.get("env") or {}), headers=secret(c.get("headers") or {}),
                    status=lv.status if lv else ("disconnected" if c["enabled"] else "disabled"), error=lv.error if lv else "",
                    tools=[{"name": t.name, "description": (t.description or "")[:200],
@@ -160,7 +177,8 @@ class Connectors:
         prev = self.items.get(cid) if cid else None
         if prev:  # keep stored secrets unless replaced
             body = {**body, "env": body.get("env") if body.get("env") and "••••" not in body["env"].values() else prev.get("env"),
-                    "headers": body.get("headers") if body.get("headers") and "••••" not in body["headers"].values() else prev.get("headers")}
+                    "headers": body.get("headers") if body.get("headers") and "••••" not in body["headers"].values() else prev.get("headers"),
+                    "url": prev.get("url") if "••••" in str(body.get("url") or "") else body.get("url")}
         c = self.validate(body, prev)
         self.items[c["id"]] = c
         self.save()

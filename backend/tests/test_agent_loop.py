@@ -739,3 +739,21 @@ async def test_triggers(store, monkeypatch, tmp_path):
         t.create({"kind": "condition", "prompt": "x", "condition": "y", "everyMinutes": 1})
     await t.delete(cond["id"])
     assert cond["id"] not in t.items
+
+
+def test_plugin_catalog_build():
+    """Catalog entries render into connector configs; secrets stay out of args and visible URLs."""
+    from app import connectors, plugins
+    cat = plugins.catalog({})
+    assert {"效率", "开发", "出行"} <= set(cat["categories"]) and all(p["connector"] is None for p in cat["plugins"])
+    with pytest.raises(plugins.PluginError):
+        plugins.build("lark", {"app_id": "cli_1"})
+    lark = plugins.build("lark", {"app_id": "cli_1", "app_secret": "s3cret"})
+    assert lark["command"] == "sh" and "s3cret" not in " ".join(lark["args"]) and lark["env"]["LARK_APP_SECRET"] == "s3cret"
+    amap = plugins.build("amap", {"key": "abc123"})
+    assert amap["url"].endswith("key=abc123") and connectors.mask_url(amap["url"]).endswith("key=••••")
+    c7 = plugins.build("context7", {})
+    assert c7["headers"] == {} and c7["plugin"] == "context7" and c7["autoApprove"]
+    assert not plugins.build("stripe", {"key": "k"})["autoApprove"]  # can write: calls are confirmed
+    gh = plugins.build("github", {"token": "t"})
+    assert gh["headers"] == {"Authorization": "Bearer t"}

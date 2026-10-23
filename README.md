@@ -19,6 +19,7 @@
 - **流式输出**：回复和 `message_*` 的文本边生成边推送（`chatDelta`）
 - **文件持久化与资料库**：Agent 写入/交付的文件和用户上传都另存到会话目录，容器删除后仍可下载；"资料库"跨任务浏览，按文本和 PDF / 幻灯片 / 表格 / 图片 / 视频 / 音频 / 其他筛选、预览
 - **模式与 Flex**：顶栏切换 Max / 标准 / Lite（网关上的不同模型和推理强度）；Flex 用自己的密钥接 OpenAI、Anthropic、Google、xAI、DeepSeek、Kimi、智谱、通义千问、硅基流动、OpenRouter、Fireworks 或任意 OpenAI 兼容端点，也可直接选网关上的其他模型
+- **插件**：侧栏"插件"按效率 / 创作 / 商业 / 开发 / 财经 / 出行浏览 25 个预置 MCP 连接器（飞书、Notion、GitHub、高德地图、百度地图、Context7、DeepWiki、Stripe、Supabase、ElevenLabs、MiniMax 等），填好密钥即可连接；命令行密钥经环境变量传入、URL 中的密钥在列表中打码；只读查询类插件（文档、搜索、地图、行情、时间）调用免确认
 - **连接器（MCP）**：stdio / Streamable HTTP / SSE；工具不进工具表，Agent 用 `mcp_search_tools` 按需检索、`mcp_call_tool` 调用；非只读工具调用前需确认
 - **分享回放**：生成只读链接（可撤销），访客可浏览工作日志、电脑面板并按原节奏回放
 - **Wide Research 控制**：运行中可停止/重试单个子任务、强制继续；已完成项可在重跑时复用

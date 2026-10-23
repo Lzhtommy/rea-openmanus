@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, connectors, llm, personal, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import config, connectors, llm, personal, plugins, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -495,6 +495,37 @@ async def restart_connector(cid: str):
         raise HTTPException(404, "connector not found")
     await connectors.manager.restart(cid)
     return connectors.manager.public(connectors.manager.items[cid])
+
+
+# ------------------------------------------------------------- plugins (插件 catalog) ---
+
+def _installed_plugins() -> dict[str, dict]:
+    return {c["plugin"]: c for c in connectors.manager.list() if c.get("plugin")}
+
+
+@app.get("/api/plugins")
+async def list_plugins():
+    return plugins.catalog(_installed_plugins())
+
+
+@app.post("/api/plugins/{pid}/install")
+async def install_plugin(pid: str, body: dict):
+    """Render the catalog entry with the user's values and save it as a connector (re-install updates it)."""
+    try:
+        cfg = plugins.build(pid, body.get("values") or {})
+    except plugins.PluginError as e:
+        raise HTTPException(400, str(e))
+    prev = _installed_plugins().get(pid)
+    try:
+        c = await connectors.manager.upsert(cfg, prev["id"] if prev else None)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    lv = connectors.manager.live.get(c["id"])
+    for _ in range(90):  # report the connection result, not just "saved"
+        if not lv or lv.status not in ("connecting", "disconnected"):
+            break
+        await asyncio.sleep(0.5)
+    return connectors.manager.public(connectors.manager.items[c["id"]])
 
 
 # ------------------------------------------------------------- schedules (自动化) ---
