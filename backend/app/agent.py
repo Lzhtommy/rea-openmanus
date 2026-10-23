@@ -67,6 +67,7 @@ class AgentHost:
     async def keep_file(self, path: str, kind: str) -> None: ...
     def create_schedule(self, args: dict) -> dict: raise NotImplementedError
     def propose_knowledge(self, title: str, content: str) -> dict: raise NotImplementedError
+    def create_trigger(self, args: dict) -> dict: raise NotImplementedError
     def skill_used(self, name: str) -> None: ...
     def preview_url(self, port: int) -> str: return ""
     def persist(self) -> None: ...
@@ -74,7 +75,8 @@ class AgentHost:
 
 class Agent:
     def __init__(self, host: AgentHost, sandbox: Sandbox, messages: list[dict], role: str = "main",
-                 profile: providers.Profile | None = None, on_progress: Callable[[str], None] | None = None):
+                 profile: providers.Profile | None = None, on_progress: Callable[[str], None] | None = None,
+                 max_iterations: int | None = None):
         self.host = host
         self.sandbox = sandbox
         self.profile = profile or providers.resolve(None)
@@ -83,6 +85,7 @@ class Agent:
         self.role = role
         self.effort = effort
         self.on_progress = on_progress
+        self.max_iterations = max_iterations or config.MAX_ITERATIONS
         self.result: str | None = None  # sub-agent deliverable
         self.plan_step_id: str | None = None
         self.opened = False  # first user-facing message of a run is the "opening" delivery
@@ -92,7 +95,7 @@ class Agent:
 
     async def run(self) -> None:
         self.repair_history()
-        for _ in range(config.MAX_ITERATIONS):
+        for _ in range(self.max_iterations):
             self._inject_inbox()
             if self.role == "main":
                 await self.host.emit({"type": "liveStatus", "text": "Thinking"})
@@ -135,7 +138,7 @@ class Agent:
                 if text and self.role == "main":
                     await self.host.emit({"type": "chat", "sender": "assistant", "messageType": "text", "content": text,
                                           "attachments": [], "deliveryKind": "result", "streamId": text_id})
-                if self.role == "subagent":
+                if self.role != "main":
                     self.result = text
                 self.host.persist()
                 return
@@ -154,7 +157,7 @@ class Agent:
             self.host.persist()
             if stop:
                 return
-        await self._error(f"Stopped after {config.MAX_ITERATIONS} iterations.")
+        await self._error(f"Stopped after {self.max_iterations} iterations.")
 
     def _on_delta(self, stream_id: str, text: str) -> None:
         """Forward streamed user-facing text as ephemeral chatDelta events (throttled)."""
@@ -457,6 +460,17 @@ class Agent:
                                "Each run starts a new task with the prompt. The user can manage it under 自动化.",
                                {"schedule": s})
 
+        if name == "trigger_create":
+            from .triggers import TriggerError
+            try:
+                t = host.create_trigger(a)
+            except TriggerError as e:
+                return ToolOutcome(f"Could not create the trigger: {e}", is_error=True, detail={"error": str(e)})
+            how = (f"POST to {t['url']} (any JSON or text body) starts a run" if t["kind"] == "webhook"
+                   else f"the condition is checked {t['description']}")
+            return ToolOutcome(f"Trigger \"{t['title']}\" created: {how}. The user can manage it under 自动化 → 触发器.",
+                               {"trigger": t})
+
         # ---- knowledge
         if name == "knowledge_save":
             try:
@@ -473,7 +487,7 @@ class Agent:
 
         # ---- control
         if name == "idle":
-            if self.role == "subagent":
+            if self.role != "main":
                 self.result = a.get("result") or "(sub-agent returned no result)"
             return ToolOutcome("Entered standby.", stop=True)
 

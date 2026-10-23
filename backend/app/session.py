@@ -41,6 +41,7 @@ class Session(AgentHost):
         self.approved: set[str] = set()
         self.files: dict[str, dict] = {}  # sandbox path -> stored copy (survives the sandbox)
         self.schedule_id: str | None = None  # set when a scheduled task started this session
+        self.trigger_id: str | None = None  # set when a trigger (webhook / condition) started this session
         self.project_id: str | None = None  # project this task belongs to (instructions + files)
         self.project_announced = False
         self.share: dict | None = None  # {token, createdAt}: public read-only replay link
@@ -61,7 +62,7 @@ class Session(AgentHost):
 
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
-                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id,
+                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id, "triggerId": self.trigger_id,
                 "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id}
 
     def persist(self) -> None:
@@ -80,6 +81,7 @@ class Session(AgentHost):
         s.env_announced = meta.get("envAnnounced", False)
         s.files = meta.get("files", {})
         s.schedule_id = meta.get("scheduleId")
+        s.trigger_id = meta.get("triggerId")
         s.model_selection = meta.get("model") or {}
         s.share = meta.get("share")
         s.project_id = meta.get("projectId")
@@ -206,6 +208,12 @@ class Session(AgentHost):
                 "time": a.get("time"), "weekday": a.get("weekday")}
         return scheduler.create(a.get("title", ""), a.get("prompt", ""), spec, source=self.session_id)
 
+    def create_trigger(self, a: dict) -> dict:
+        from .triggers import triggers
+        return triggers.create({"kind": a.get("kind"), "title": a.get("title"), "prompt": a.get("prompt"),
+                                "condition": a.get("condition"), "everyMinutes": a.get("every_minutes") or 60},
+                               source=self.session_id)
+
     def propose_knowledge(self, title: str, content: str) -> dict:
         return personal.store.add(title, content, source="agent", session_id=self.session_id, pending=True)
 
@@ -243,12 +251,16 @@ class Session(AgentHost):
         self.model_selection = {k: selection[k] for k in ("mode", "provider", "model") if selection.get(k)}
         self.persist()
 
-    async def user_message(self, text: str, attachments: list[str], selected_skills: list[str] | None = None) -> None:
+    async def user_message(self, text: str, attachments: list[str], selected_skills: list[str] | None = None,
+                           event: dict | None = None) -> None:
+        """event: {source, text} when an automation sent this message; shown apart from the request."""
         picked = [n for n in selected_skills or [] if n in skills.store.items]
         await self.emit({"type": "chat", "sender": "user", "messageType": "text", "content": text,
                          "attachments": [{"path": p, "filename": p.rsplit("/", 1)[-1], "url": self.file_url(p)}
-                                         for p in attachments], **({"skills": picked} if picked else {})})
-        full = text + (("\n\nAttached files (in the sandbox):\n" + "\n".join(attachments)) if attachments else "")
+                                         for p in attachments], **({"skills": picked} if picked else {}),
+                         **({"triggerEvent": event} if event else {})})
+        full = text + (f"\n\n{event['text']}" if event else "")
+        full += ("\n\nAttached files (in the sandbox):\n" + "\n".join(attachments)) if attachments else ""
         if picked:  # Manus' extData.capabilities.enabledSkills: the user pinned skills to this request
             self.picked_skills |= set(picked)
             full += ("\n\n<selected_skills>\nThe user chose these skills for this request. Read each SKILL.md with "

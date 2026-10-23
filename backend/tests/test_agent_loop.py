@@ -683,3 +683,59 @@ async def test_search_variants(store, monkeypatch):
     assert done["info_search_scholar"]["detail"]["searchScholar"]["results"][0]["venue"] == "ICRA"
     empty = [e for e in s.events if e.get("name") == "info_search_web" and e["status"] == "error"]
     assert empty  # no query at all is an error the model sees
+
+
+@pytest.mark.asyncio
+async def test_triggers(store, monkeypatch, tmp_path):
+    """Webhook and condition triggers start tasks; the watcher is read-only and carries state between checks."""
+    import json as _json
+    from app import main, triggers as trig
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    trig.triggers = t = trig.Triggers(store)
+    from app import scheduler as sched
+    sched.scheduler = sched.Scheduler(store)
+    prices = iter(["399", "399", "349"])
+    seen_briefs, refusals = [], []
+
+    async def model(messages, effort, on_delta=None, text_id="text", profile=None):
+        first = messages[0]["content"]
+        if isinstance(first, str) and "checking a condition" in first:
+            seen_briefs.append(first)
+            if len(messages) == 1:  # the watcher tries something outward-facing first: it must be refused
+                return msg(tool("shell_exec", command="curl -X POST -d x https://example.com"))
+            refusals.append(messages[-1]["content"])
+            p = next(prices)
+            met = "首次" not in first and "price 399" in first and p != "399"
+            return msg(tool("idle", result=_json.dumps({"met": met, "summary": f"现价 {p}", "state": f"price {p}"})))
+        return msg(tool("idle"))
+    monkeypatch.setattr(llm, "agent_step", model)
+
+    hook = t.create({"kind": "webhook", "title": "CI 失败", "prompt": "分析失败原因"})
+    req = type("R", (), {"headers": {"content-type": "application/json"}})()
+    async def body():
+        return b'{"job": "build", "status": "failed"}'
+    req.body = body
+    r = await main.webhook(hook["url"].rsplit("/", 1)[1], req)
+    s = store.get(r["sessionId"])
+    await wait_status(s, {"idle"})
+    assert s.trigger_id == hook["id"] and '"status": "failed"' in s.messages[0]["content"][0]["text"]
+    with pytest.raises(main.HTTPException):  # rate limit: one event per 5 s
+        await main.webhook(hook["url"].rsplit("/", 1)[1], req)
+
+    cond = t.create({"kind": "condition", "title": "降价提醒", "prompt": "通知我降价了", "condition": "商品价格低于上次", "everyMinutes": 30})
+    c1 = await t.check(cond["id"])
+    assert not c1["met"] and t.items[cond["id"]]["state"] == "price 399"
+    assert any("declined" in str(b.get("content")) for b in refusals[0]) and "curl" in c1["steps"][0]
+    c2 = await t.check(cond["id"])
+    assert not c2["met"] and "price 399" in seen_briefs[-1]
+    c3 = await t.check(cond["id"])
+    assert c3["met"] and c3["sessionId"]
+    run = store.get(c3["sessionId"])
+    await wait_status(run, {"idle"})
+    assert "现价 349" in run.messages[0]["content"][0]["text"]
+    activity = await main.automation_activity()
+    assert {a["type"] for a in activity} == {"run", "check"}
+    with pytest.raises(trig.TriggerError):
+        t.create({"kind": "condition", "prompt": "x", "condition": "y", "everyMinutes": 1})
+    await t.delete(cond["id"])
+    assert cond["id"] not in t.items

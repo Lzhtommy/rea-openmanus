@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, connectors, llm, personal, projects, skills, providers, scheduler as scheduler_mod, session as session_mod
+from . import config, connectors, llm, personal, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -41,6 +41,8 @@ async def lifespan(app: FastAPI):
     skills.store = skills.Skills()
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
+    triggers_mod.triggers = triggers_mod.Triggers(session_mod.store)
+    triggers_mod.triggers.start()
     def busy(sid: str) -> bool:
         s = session_mod.store.get(sid)
         return bool(s and ((s.task and not s.task.done()) or s.pending_confirms or s.status in ("running", "waiting")))
@@ -55,6 +57,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(connectors.manager.start_all())
     yield
     await scheduler_mod.scheduler.stop()
+    await triggers_mod.triggers.stop()
     await connectors.manager.stop_all()
     for s in session_mod.store.sessions.values():
         if s.task and not s.task.done():
@@ -536,6 +539,122 @@ async def delete_schedule(sid: str):
 async def run_schedule(sid: str):
     _sched(sid)
     return {"sessionId": await scheduler_mod.scheduler.run(sid)}
+
+
+# ------------------------------------------------------------- triggers & advanced automation ---
+
+def _trigger(tid: str) -> dict:
+    t = triggers_mod.triggers.items.get(tid)
+    if not t:
+        raise HTTPException(404, "trigger not found")
+    return t
+
+
+@app.get("/api/triggers")
+async def list_triggers():
+    return triggers_mod.triggers.list()
+
+
+@app.post("/api/triggers")
+async def create_trigger(body: dict):
+    try:
+        return triggers_mod.triggers.create(body)
+    except (triggers_mod.TriggerError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/api/triggers/{tid}")
+async def update_trigger(tid: str, body: dict):
+    _trigger(tid)
+    try:
+        return triggers_mod.triggers.update(tid, body)
+    except (triggers_mod.TriggerError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/triggers/{tid}")
+async def delete_trigger(tid: str):
+    _trigger(tid)
+    await triggers_mod.triggers.delete(tid)
+    return {"ok": True}
+
+
+@app.post("/api/triggers/{tid}/check")
+async def check_trigger(tid: str):
+    """Check a condition trigger now (in the background); the result appears in its check history."""
+    t = _trigger(tid)
+    if t["kind"] != "condition":
+        raise HTTPException(400, "only condition triggers are checked")
+    if tid in triggers_mod.triggers.checking:
+        raise HTTPException(409, "正在检查中")
+    asyncio.create_task(triggers_mod.triggers.check(tid))
+    await asyncio.sleep(0)
+    return triggers_mod.triggers.view(t)
+
+
+@app.post("/api/triggers/{tid}/fire")
+async def fire_trigger(tid: str):
+    """Run the action now, as a test (webhook: with a sample payload)."""
+    t = _trigger(tid)
+    ctx = ("<trigger_event source=\"manual\">\nStarted manually by the user to test this trigger; no real event "
+           "payload.\n</trigger_event>")
+    return {"sessionId": await triggers_mod.triggers.fire(t["id"], ctx)}
+
+
+@app.post("/api/hooks/{token}")
+async def webhook(token: str, request: Request):
+    """Incoming webhook: the secret token identifies the trigger; the body is passed to the task as context."""
+    t = triggers_mod.triggers.by_token(token)
+    if not t or not t["enabled"]:
+        raise HTTPException(404, "unknown or disabled hook")
+    body = await request.body()
+    if len(body) > 256 * 1024:
+        raise HTTPException(413, "payload too large")
+    ctype = request.headers.get("content-type", "")
+    text = body.decode("utf-8", "replace")
+    if "json" in ctype:
+        with contextlib.suppress(ValueError):
+            text = json.dumps(json.loads(text), ensure_ascii=False, indent=1)
+    try:
+        sid = await triggers_mod.triggers.webhook(t, text, ctype)
+    except triggers_mod.TriggerError as e:
+        raise HTTPException(429, str(e))
+    return {"ok": True, "sessionId": sid}
+
+
+@app.post("/api/automations/parse")
+async def parse_automation(body: dict):
+    """高级自动化: a description in the user's own words -> a proposed schedule / trigger (the client confirms)."""
+    text = str(body.get("text") or "").strip()
+    if len(text) < 4:
+        raise HTTPException(400, "请描述你希望 OpenManus 何时做什么")
+    from datetime import datetime
+    r = await llm.parse_automation(text, datetime.now().strftime("%Y-%m-%d %H:%M (%A)"))
+    if not r:
+        raise HTTPException(502, "解析失败，请换个说法再试")
+    return r
+
+
+@app.get("/api/automations/activity")
+async def automation_activity():
+    """动态: every automated run (schedules and triggers) and condition checks, newest first."""
+    names = {**{s["id"]: ("schedule", s["title"]) for s in scheduler_mod.scheduler.items.values()},
+             **{t["id"]: (t["kind"], t["title"]) for t in triggers_mod.triggers.items.values()}}
+    items = []
+    for s in session_mod.store.sessions.values():
+        src = s.schedule_id or s.trigger_id
+        if not src:
+            continue
+        kind, title = names.get(src, ("schedule" if s.schedule_id else "trigger", "（已删除的自动化）"))
+        files = [{"filename": f["filename"], "url": s.file_url(f["path"])} for f in s.files.values() if "deliverable" in f["kinds"]]
+        items.append({"type": "run", "at": s.created_at, "sessionId": s.session_id, "title": s.title, "status": s.status,
+                      "source": {"id": src, "kind": kind, "title": title}, "files": files[:4]})
+    for t in triggers_mod.triggers.items.values():
+        for c in t.get("checks", []):
+            if not c.get("sessionId"):
+                items.append({"type": "check", "at": c["at"], "met": c["met"], "summary": c["summary"],
+                              "source": {"id": t["id"], "kind": "condition", "title": t["title"]}})
+    return sorted(items, key=lambda x: -x["at"])[:200]
 
 
 @app.get("/api/library")

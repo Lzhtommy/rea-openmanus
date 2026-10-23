@@ -60,6 +60,8 @@ const ICONS = {
   spark: '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
   github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.1-1.3-.3-2.5-1-3.5.3-1.2.3-2.4 0-3.5 0 0-1 0-3 1.5-2.6-.5-5.4-.5-8 0C6 2 5 2 5 2c-.3 1.1-.3 2.3 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.4.5-.7 1-.8 1.6-.2.6-.3 1.3-.2 1.9v4"/><path d="M9 18c-4.5 2-5-2-7-2"/>',
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  webhook: '<path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"/><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"/>',
   book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
@@ -125,6 +127,7 @@ const S = {
   vnc: false, vncFailed: false,
   attachments: [], previews: {},
   personal: { profile: {}, instructions: "", knowledge: [] }, persTab: "profile", editingKnow: null,
+  triggers: [], activity: [], autoTab: "activity", editingTrig: null,
   skills: { skills: [], catalog: [], categories: [] }, skTab: "explore", skCat: "all", skSrc: "all", pickedSkills: [], skillView: null,
 };
 
@@ -347,7 +350,9 @@ const shortModel = (m) => String(m).split("/").pop();
 function userHtml(ev) {
   const files = (ev.attachments || []).map((a) => `<a class="chip-file" href="${esc(a.url)}" target="_blank">${icon("fileText")}<span>${esc(a.filename)}</span></a>`).join("");
   const sks = (ev.skills || []).map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span></span>`).join("");
-  return `<div class="msg-user"><div><div class="bubble">${esc(ev.content)}</div>${files || sks ? `<div class="files">${sks}${files}</div>` : ""}</div></div>`;
+  const te = ev.triggerEvent;
+  const evHtml = te ? `<details class="trig-ev"><summary>${icon(SRC_ICO[te.source] || "zap")}${esc({ webhook: "收到 Webhook 事件", condition: "触发条件已满足", manual: "试运行" }[te.source] || "触发事件")}</summary><pre>${esc(te.text.replace(/^<trigger_event[^>]*>\n?|\n?<\/trigger_event>[\s\S]*$/g, ""))}</pre></details>` : "";
+  return `<div class="msg-user"><div>${evHtml}<div class="bubble">${esc(ev.content)}</div>${files || sks ? `<div class="files">${sks}${files}</div>` : ""}</div></div>`;
 }
 
 function itemHtml(t, it, isCurrent) {
@@ -401,6 +406,7 @@ function summarize(steps) {
     else if (n === "agent_map_reduce") c.mr++;
     else if (n.startsWith("deploy_")) c.dep++;
     else if (n.startsWith("schedule_")) c.sched = (c.sched || 0) + 1;
+    else if (n === "trigger_create") c.trig = (c.trig || 0) + 1;
     else if (n === "mcp_search_tools") c.ts = (c.ts || 0) + 1;
     else if (n === "mcp_call_tool") c.tc = (c.tc || 0) + 1;
     else if (n === "knowledge_save") c.kn = (c.kn || 0) + 1;
@@ -419,6 +425,7 @@ function summarize(steps) {
   if (c.mr) parts.push(`并行执行了 ${c.mr} 批子任务`);
   if (c.dep) parts.push(`部署了 ${c.dep} 个服务`);
   if (c.sched) parts.push(`创建了 ${c.sched} 个定时任务`);
+  if (c.trig) parts.push(`创建了 ${c.trig} 个触发器`);
   if (c.ts) parts.push(`搜索了 ${c.ts} 次工具`);
   if (c.tc) parts.push(`调用了 ${c.tc} 次连接器工具`);
   if (c.kn) parts.push(`提议记住 ${c.kn} 条知识`);
@@ -636,6 +643,7 @@ function stepView(s) {
   if (d.mcp) return `<div class="file-head">${icon("plug")}<span class="grow">${esc(d.mcp.server)} · ${esc(d.mcp.action)}</span></div>` +
     `<div class="page-md"><div class="mcp-label">参数</div><pre class="cc-cmd">${esc(d.mcp.argumentsPreview)}</pre><div class="mcp-label">结果</div><pre class="cc-cmd mcp-out">${esc(d.mcp.resultPreview)}</pre></div>`;
   if (d.knowledge) return `<div class="mr">${knowCardHtml(d.knowledge)}</div>`;
+  if (d.trigger) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${trigCardHtml(d.trigger, false)}</div></div>`;
   if (d.schedule) return `<div class="mr"><div class="auto-card" style="margin:8px 0">${autoCardHtml(d.schedule, false)}</div></div>`;
   if (d.deploy) return `<div class="urlbar">${icon("globe")}<a href="${esc(d.deploy.url)}" target="_blank">${esc(d.deploy.url)}</a></div><iframe class="preview-frame" style="height:calc(100% - 37px)" src="${esc(d.deploy.url)}"></iframe>`;
   if (d.error) return `<div class="err-view"><div class="term">${esc(d.error)}</div></div>`;
@@ -966,7 +974,7 @@ function renderSessions() {
   const q = S.filter.trim().toLowerCase();
   const list = S.sessions.filter((s) => !q || String(s.title).toLowerCase().includes(q));
   $("#session-list").innerHTML = list.map((s) => `<div class="session-item ${s.id === S.current ? "active" : ""}" data-id="${esc(s.id)}">` +
-    `<span class="s-ico">${s.status === "running" ? icon("loader", "spin-i") : icon(s.status === "error" ? "alert" : s.scheduleId ? "clock" : "message")}</span>` +
+    `<span class="s-ico">${s.status === "running" ? icon("loader", "spin-i") : icon(s.status === "error" ? "alert" : s.scheduleId ? "clock" : s.triggerId ? "zap" : "message")}</span>` +
     `<span class="s-title">${esc(s.title)}</span><button class="s-more" data-del="${esc(s.id)}" title="删除">${icon("trash")}</button></div>`).join("") ||
     `<div class="session-empty">${q ? "没有匹配的任务" : "暂无任务"}</div>`;
   $("#session-list").querySelectorAll(".spin-i").forEach((n) => (n.style.animation = "spin 1s linear infinite"));
@@ -1254,16 +1262,110 @@ function renderMe() {
 // ------------------------------------------------------------------ automations (自动化) ---
 const fmtTs = (sec) => (sec ? new Date(sec * 1000).toLocaleString("zh-CN", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" }) : "—");
 
-async function openAutomations() {
+async function openAutomations(tab) {
   if (S.current) send({ type: "leave_session", sessionId: S.current });
-  S.current = null; resetSession(); S.view = "automations";
+  S.current = null; resetSession(); S.view = "automations"; if (tab) S.autoTab = tab;
   history.replaceState(null, "", "#automations");
   renderSessions();
   await loadSchedules();
 }
 async function loadSchedules() {
-  try { S.schedules = await (await fetch("/api/schedules")).json(); } catch { S.schedules = []; }
+  const get = async (u, d) => { try { return await (await fetch(u)).json(); } catch { return d; } };
+  [S.schedules, S.triggers, S.activity] = await Promise.all([get("/api/schedules", []), get("/api/triggers", []), get("/api/automations/activity", [])]);
   scheduleRender();
+}
+// While a condition check runs, refresh the automation page so its result shows up.
+setInterval(() => { if (S.view === "automations" && S.triggers.some((t) => t.checking)) loadSchedules(); }, 3000);
+
+const ago = (sec) => { const m = Math.round((Date.now() / 1000 - sec) / 60); return m < 1 ? "刚刚" : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : fmtTs(sec); };
+function trigCardHtml(t, actions = true) {
+  const kindIco = t.kind === "webhook" ? "webhook" : "zap";
+  const last = (t.checks || [])[0];
+  const body = t.kind === "webhook"
+    ? `<div class="hook-url"><code>${esc(t.url)}</code>${actions ? `<button class="btn ghost sm" data-trig="copy" data-id="${esc(t.id)}">${icon("copy")}复制</button>` : ""}</div>` +
+      (actions ? `<details class="hook-help"><summary>如何调用</summary><pre class="cc-cmd">curl -X POST ${esc(t.url)} \\\n  -H 'Content-Type: application/json' \\\n  -d '{"event": "示例", "detail": "..."}'</pre></details>` : "")
+    : `<div class="auto-prompt"><b>条件</b>　${esc(t.condition)}</div>` +
+      (t.checking ? `<div class="check-row"><span class="spin">${icon("loader")}</span>正在检查…</div>` : last ? `<div class="check-row ${last.met ? "met" : ""}">${icon(last.met ? "check" : "clock")}${esc(ago(last.at))}检查：${last.met ? "条件满足，已运行" : "未满足"} · ${esc(last.summary)}</div>` : "");
+  const runs = (t.runs || []).slice(0, 3).map((id) => { const sess = S.sessions.find((x) => x.id === id); return `<a href="#${esc(id)}" data-goto="${esc(id)}">${icon("message")}${esc(sess?.title || id)}</a>`; }).join("");
+  return `<div class="auto-top"><span class="auto-ico">${icon(kindIco)}</span><div class="auto-main"><div class="auto-title">${esc(t.title)}</div><div class="auto-when">${esc(t.description)}${t.enabled ? "" : " · 已暂停"}</div></div>` +
+    (actions ? `<button class="switch ${t.enabled ? "on" : ""}" data-trig="toggle" data-id="${esc(t.id)}" title="${t.enabled ? "暂停" : "启用"}"><i></i></button>` : "") + `</div>` +
+    body + `<div class="auto-prompt"><b>执行</b>　${esc(t.prompt)}</div>` +
+    (actions ? `<div class="auto-foot"><div class="auto-runs">${runs ? `<span>最近运行</span>${runs}` : `<span>还没有运行过</span>`}</div>` +
+      (t.kind === "condition" ? `<button class="btn ghost sm" data-trig="check" data-id="${esc(t.id)}" ${t.checking ? "disabled" : ""}>${icon("search")}立即检查</button>` : "") +
+      `<button class="btn ghost sm" data-trig="fire" data-id="${esc(t.id)}">${icon("play2")}试运行</button>` +
+      `<button class="icon-btn sm" data-trig="edit" data-id="${esc(t.id)}" title="编辑">${icon("pencil")}</button>` +
+      `<button class="icon-btn sm" data-trig="del" data-id="${esc(t.id)}" title="删除">${icon("trash")}</button></div>` : "");
+}
+const SRC_ICO = { schedule: "clock", webhook: "webhook", condition: "zap", trigger: "zap" };
+function activityHtml() {
+  if (!S.activity.length) return `<div class="lib-empty">${icon("clock")}<div>还没有自动运行记录</div><div class="muted">定时任务到点运行、触发器触发或条件检查后，会按时间显示在这里</div></div>`;
+  let day = "", h = "";
+  for (const a of S.activity) {
+    const d = new Date(a.at * 1000).toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
+    if (d !== day) { day = d; h += `<div class="nav-section" style="padding-left:0">${esc(d)}</div>`; }
+    const lead = a.type === "check" ? "条件检查：未满足" : { schedule: "已到达预定时间", webhook: "收到 Webhook 事件", condition: "条件满足" }[a.source.kind] || "自动运行";
+    const st = a.type === "run" ? ({ running: "运行中", waiting: "等待你的回复", error: "出错", stopped: "已停止" }[a.status] || "已完成") : "";
+    h += `<div class="act-row ${a.type}"><span class="act-time">${fmtTime(a.at * 1000)}</span><span class="act-ico">${icon(SRC_ICO[a.source.kind] || "zap")}</span><div class="act-main">` +
+      `<div><b>${esc(a.source.title)}</b><span class="muted"> · ${esc(lead)}</span>${st ? `<span class="lib-tag">${esc(st)}</span>` : ""}</div>` +
+      (a.type === "run" ? `<a href="#${esc(a.sessionId)}" data-goto="${esc(a.sessionId)}" class="act-link">${icon("message")}${esc(a.title)}</a>` : `<div class="muted act-sum">${esc(a.summary)}</div>`) +
+      (a.files?.length ? `<div class="act-files">${a.files.map((f) => `<a class="chip-file" href="${esc(f.url)}" target="_blank">${icon("fileText")}<span>${esc(f.filename)}</span></a>`).join("")}</div>` : "") + `</div></div>`;
+  }
+  return h;
+}
+function openTrigForm(t, preset = {}) {
+  S.editingTrig = t || null;
+  const f = $("#trig-form"); f.reset();
+  $("#trig-form-title").textContent = t ? "编辑触发器" : "新建触发器"; $("#trig-err").textContent = "";
+  const v = t || preset;
+  if (v.kind) f.kind.value = v.kind;
+  f.kind.disabled = !!t;
+  ["title", "prompt", "condition"].forEach((k) => { if (v[k]) f[k].value = v[k]; });
+  if (v.everyMinutes) f.everyMinutes.value = Math.max(10, v.everyMinutes);
+  syncTrigFields();
+  $("#trig-modal").classList.remove("hidden");
+}
+function syncTrigFields() { const k = $("#trig-form").kind.value; $("#trig-form").querySelectorAll("[data-for]").forEach((n) => n.classList.toggle("hidden", n.dataset.for !== k)); }
+async function saveTrig(e) {
+  e.preventDefault();
+  const f = e.target;
+  const body = { kind: f.kind.value, title: f.title.value.trim() || f.prompt.value.trim().slice(0, 30), prompt: f.prompt.value, condition: f.condition.value, everyMinutes: +f.everyMinutes.value };
+  const r = await fetch(S.editingTrig ? `/api/triggers/${S.editingTrig.id}` : "/api/triggers",
+    { method: S.editingTrig ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) { $("#trig-err").textContent = (await r.json().catch(() => ({}))).detail || "保存失败"; return; }
+  $("#trig-modal").classList.add("hidden"); $("#nl-text").value = "";
+  S.autoTab = "triggers"; loadSchedules();
+}
+async function trigAction(a, id, btn) {
+  const t = S.triggers.find((x) => x.id === id);
+  if (!t) return;
+  if (a === "copy") { try { await navigator.clipboard.writeText(t.url); btn.lastChild.textContent = "已复制"; } catch { /* ignore */ } return; }
+  if (a === "edit") return openTrigForm(t);
+  if (a === "toggle") await fetch(`/api/triggers/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !t.enabled }) });
+  if (a === "del") { if (!confirm(`删除触发器「${t.title}」？已运行的任务会保留。`)) return; await fetch(`/api/triggers/${id}`, { method: "DELETE" }); }
+  if (a === "check") { t.checking = true; renderAutomations(); await fetch(`/api/triggers/${id}/check`, { method: "POST" }); }
+  if (a === "fire") { const r = await (await fetch(`/api/triggers/${id}/fire`, { method: "POST" })).json(); await refreshSessions(); openSession(r.sessionId); return; }
+  loadSchedules();
+}
+// 高级自动化: describe it in your own words; the model proposes a schedule or trigger for the user to confirm.
+async function parseAutomation(e) {
+  e.preventDefault();
+  const text = $("#nl-text").value.trim(); if (!text) return;
+  const btn = $("#nl-go"); btn.disabled = true; btn.textContent = "理解中…"; $("#nl-err").textContent = "";
+  const r = await fetch("/api/automations/parse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+  btn.disabled = false; btn.textContent = "创建";
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("#nl-err").textContent = j.detail || "解析失败"; return; }
+  if (j.type === "schedule") {
+    openSchedForm(null);
+    const f = $("#sched-form"), sc = j.schedule || {};
+    f.title.value = j.title || ""; f.prompt.value = j.prompt || text;
+    if (sc.kind) f.kind.value = sc.kind;
+    if (sc.time) f.time.value = sc.time;
+    if (sc.weekday !== undefined) f.weekday.value = sc.weekday;
+    if (sc.everyMinutes) f.everyMinutes.value = sc.everyMinutes;
+    if (sc.at) f.at.value = String(sc.at).slice(0, 16);
+    syncSchedFields();
+  } else openTrigForm(null, { kind: j.type, title: j.title, prompt: j.prompt || text, condition: j.condition, everyMinutes: j.everyMinutes || 60 });
 }
 
 function autoCardHtml(s, actions = true) {
@@ -1282,8 +1384,16 @@ function autoCardHtml(s, actions = true) {
 }
 
 function renderAutomations() {
+  $("#auto-tabs").innerHTML = [["activity", "动态"], ["schedules", `定时任务<span>${S.schedules.length}</span>`], ["triggers", `触发器<span>${S.triggers.length}</span>`]]
+    .map(([k, l]) => `<button class="lib-tab ${S.autoTab === k ? "on" : ""}" data-autotab="${k}">${l}</button>`).join("");
+  if (S.autoTab === "activity") { $("#auto-list").innerHTML = activityHtml(); return; }
+  if (S.autoTab === "triggers") {
+    $("#auto-list").innerHTML = S.triggers.length ? S.triggers.map((t) => `<div class="auto-card ${t.enabled ? "" : "off"}">${trigCardHtml(t)}</div>`).join("")
+      : `<div class="lib-empty">${icon("zap")}<div>还没有触发器</div><div class="muted">选择一个事件，并定义它发生时 OpenManus 应执行的操作：条件满足时，或外部系统发来 Webhook 时</div></div>`;
+    return;
+  }
   $("#auto-list").innerHTML = S.schedules.length ? S.schedules.map((s) => `<div class="auto-card ${s.enabled ? "" : "off"}">${autoCardHtml(s)}</div>`).join("")
-    : `<div class="lib-empty">${icon("clock")}<div>还没有定时任务</div><div class="muted">点击右上角「新建定时任务」，或在对话中让 OpenManus 帮你创建</div></div>`;
+    : `<div class="lib-empty">${icon("clock")}<div>还没有定时任务</div><div class="muted">选择运行的时间和频率，让重复性工作自动完成；也可以在对话中让 OpenManus 帮你创建</div></div>`;
 }
 
 function openSchedForm(s) {
@@ -1324,6 +1434,7 @@ async function saveSched(e) {
     { method: S.editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) { $("#sched-err").textContent = (await r.json().catch(() => ({}))).detail || "保存失败"; return; }
   $("#sched-modal").classList.add("hidden");
+  if (S.view === "automations") { S.autoTab = "schedules"; $("#nl-text").value = ""; }
   loadSchedules();
 }
 async function schedAction(a, id) {
@@ -1511,12 +1622,23 @@ function bind() {
   $("#import-run").onclick = runImport;
   $("#import-text").oninput = () => { if (S.importDraft) { S.importDraft = null; $("#import-result").innerHTML = ""; $("#import-run").textContent = "解析"; } };
   $("#import-copy").onclick = async () => { try { await navigator.clipboard.writeText($("#import-prompt").value); $("#import-copy").textContent = "已复制"; } catch { $("#import-prompt").select(); } };
-  $("#auto-new").onclick = () => openSchedForm(null);
+  $("#auto-new").onclick = (e) => { e.stopPropagation(); $("#auto-new-menu").classList.toggle("hidden"); };
+  $("#auto-new-menu").onclick = (e) => { const b = e.target.closest("[data-auto-new]"); if (!b) return; $("#auto-new-menu").classList.add("hidden");
+    if (b.dataset.autoNew === "schedule") openSchedForm(null); else openTrigForm(null, { kind: b.dataset.autoNew }); };
+  document.addEventListener("click", (e) => { if (!e.target.closest("#auto-new")) $("#auto-new-menu").classList.add("hidden"); });
+  $("#auto-tabs").onclick = (e) => { const b = e.target.closest("[data-autotab]"); if (b) { S.autoTab = b.dataset.autotab; renderAutomations(); } };
+  $("#nl-form").onsubmit = parseAutomation;
+  $("#nl-text").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#nl-form").requestSubmit(); } };
+  $("#trig-form").onsubmit = saveTrig;
+  $("#trig-form").kind.onchange = syncTrigFields;
+  $("#trig-close").onclick = $("#trig-cancel").onclick = () => $("#trig-modal").classList.add("hidden");
   $("#auto-list").onclick = (e) => {
     const g = e.target.closest("[data-goto]");
     if (g) { e.preventDefault(); openSession(g.dataset.goto); return; }
     const b = e.target.closest("[data-sched]");
     if (b) schedAction(b.dataset.sched, b.dataset.id);
+    const tb = e.target.closest("[data-trig]");
+    if (tb) trigAction(tb.dataset.trig, tb.dataset.id, tb);
   };
   $("#sched-form").onsubmit = saveSched;
   $("#sched-form").kind.onchange = syncSchedFields;
@@ -1664,4 +1786,13 @@ async function deleteSession(sid) {
   else if (sid.startsWith("project/")) openProject(sid.slice(8));
   else openSession(sid && S.sessions.some((s) => s.id === sid) ? sid : null);
   autoGrow();
+  // back / forward and typed hashes route like the sidebar does
+  window.addEventListener("hashchange", () => {
+    const h = location.hash.slice(1);
+    if (S.readonly || h === (S.current || "") || (h === S.view && !S.current)) return;
+    if (h === "library") openLibrary(); else if (h === "automations") openAutomations(); else if (h === "connectors") openConnectors();
+    else if (h === "personal") openPersonal(); else if (h === "skills") openSkills();
+    else if (h.startsWith("project/")) openProject(h.slice(8));
+    else if (!h || S.sessions.some((s) => s.id === h)) openSession(h || null);
+  });
 })();

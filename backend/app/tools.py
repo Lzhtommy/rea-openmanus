@@ -155,6 +155,15 @@ _TOOLS = [
         "kind": {"type": "string", "enum": ["once", "interval", "daily", "weekly"]},
         "at": S, "every_minutes": I, "time": S, "weekday": I},
        ["title", "prompt", "kind"]),
+    _t("trigger_create",
+       "Create a trigger that starts a new task with `prompt` when something happens. kind=condition: a "
+       "condition in plain words that is checked every every_minutes (>= 10) by looking it up (e.g. a price "
+       "drops, a new release appears, a site goes down). kind=webhook: returns a URL that starts the task "
+       "whenever another system POSTs to it (the payload is passed along). For fixed times use schedule_create.",
+       {"kind": {"type": "string", "enum": ["condition", "webhook"]}, "title": S,
+        "prompt": {"type": "string", "description": "Full, self-contained instruction for each run"},
+        "condition": S, "every_minutes": I},
+       ["kind", "title", "prompt"]),
     # ---- knowledge (long-term memory across tasks)
     _t("knowledge_save",
        "Propose a durable fact or preference to remember for future tasks (e.g. the user's preferred report "
@@ -179,7 +188,9 @@ REQUIRED = {t["name"]: t["input_schema"]["required"] for t in TOOLS}
 # Role-based masking by prefix (the tool list itself never changes).
 ROLE_DENY = {
     "main": (),
-    "subagent": ("message_", "agent_", "schedule_", "knowledge_"),
+    "subagent": ("message_", "agent_", "schedule_", "knowledge_", "trigger_"),
+    # condition checks for triggers: observe only, nothing outward-facing or long-lived
+    "watcher": ("message_", "agent_", "schedule_", "knowledge_", "trigger_", "deploy_", "mcp_call", "plan_"),
 }
 
 
@@ -245,7 +256,7 @@ def ui_category(name: str) -> str:
         return "map_reduce"
     if name.startswith("deploy_"):
         return "deploy"
-    if name.startswith("schedule_"):
+    if name.startswith(("schedule_", "trigger_")):
         return "schedule"
     if name.startswith("mcp_"):
         return "mcp"
@@ -304,6 +315,8 @@ def describe(name: str, args: dict) -> tuple[str, str]:
         return "Using MCP", args.get("tool", "")
     if name == "schedule_create":
         return "Creating scheduled task", args.get("title", "")
+    if name == "trigger_create":
+        return "Creating trigger", args.get("title", "")
     if name == "knowledge_save":
         return "Saving knowledge", args.get("title") or args.get("content", "")[:60]
     return ACTION_LABEL.get(cat, name), ""

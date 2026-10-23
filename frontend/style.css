@@ -593,3 +593,32 @@ textarea.code-edit { font: 13px/20px var(--font-mono); min-height: 52vh; }
 .serp-item.paper .serp-title { color: var(--text-primary); font-weight: 500; }
 .paper-pdf { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-blue); margin-top: 4px; }
 .paper-pdf svg.i { width: 12px; height: 12px; }
+
+/* ---- triggers, advanced automation, activity */
+.nl-card { border: 1px solid var(--border-main); border-radius: 14px; background: var(--bg-white); padding: 12px 14px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 8px; }
+.nl-head { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
+.nl-head .muted { font-weight: 400; font-size: 13px; margin-left: 4px; }
+.nl-head svg.i { width: 16px; height: 16px; color: var(--text-blue); }
+.nl-card textarea { border: none; outline: none; resize: none; font: 14px/21px var(--font); background: transparent; color: var(--text-primary); }
+.nl-foot { display: flex; align-items: center; }
+.hook-url { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.hook-url code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/18px var(--font-mono); background: var(--fill-light); padding: 6px 10px; border-radius: 8px; }
+.hook-help { margin-top: 6px; font-size: 12px; color: var(--text-tertiary); } .hook-help pre { white-space: pre-wrap; }
+.check-row { margin-top: 8px; font-size: 12px; color: var(--text-tertiary); display: flex; align-items: center; gap: 6px; }
+.check-row.met { color: var(--success); } .check-row svg.i { width: 12px; height: 12px; flex: none; }
+.auto-prompt b { font-weight: 500; color: var(--text-primary); }
+.act-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border-light, var(--border-main)); font-size: 14px; }
+.act-time { width: 44px; flex: none; font-size: 12px; color: var(--text-tertiary); padding-top: 2px; }
+.act-ico { width: 26px; height: 26px; border-radius: 8px; background: var(--fill-blue); color: var(--text-blue); display: flex; align-items: center; justify-content: center; flex: none; }
+.act-row.check .act-ico { background: var(--fill-light); color: var(--text-tertiary); }
+.act-ico svg.i { width: 14px; height: 14px; }
+.act-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.act-main .lib-tag { margin-left: 6px; }
+.act-link { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 13px; } .act-link svg.i { width: 12px; height: 12px; }
+.act-sum { font-size: 13px; }
+.act-files { display: flex; flex-wrap: wrap; gap: 6px; }
+#trig-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.trig-ev { margin-bottom: 6px; font-size: 12px; color: var(--text-tertiary); text-align: right; }
+.trig-ev summary { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; list-style: none; }
+.trig-ev summary svg.i { width: 12px; height: 12px; }
+.trig-ev pre { text-align: left; white-space: pre-wrap; font: 12px/18px var(--font-mono); background: var(--fill-light); border-radius: 10px; padding: 8px 12px; margin: 6px 0 0; max-height: 240px; overflow: auto; }

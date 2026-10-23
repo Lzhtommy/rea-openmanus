@@ -204,6 +204,7 @@ webdev 全栈托管（自定义域名、Stripe 等）、Connectors 和 MCP 市�
 | `/app/skills`：探索技能、我的技能（个人/官方/第三方）、使用 Manus 创建 / 上传 / 从 GitHub 导入；`enabledSkills` | `skills.py`：三种来源、启用开关、使用计数（Agent 读取 SKILL.md 时计数）；按消息指定的技能以 `<selected_skills>` 追加在用户消息里，即使停用也会装入沙箱；技能目录变化时重发 `<skills>` 系统消息 |
 | `search{queries[]}`、`search_image`、`search_scholar` 工具类别 | `info_search_web` 接受 `queries`（并发、按 URL 去重），`info_search_image`（DuckDuckGo 图片，失败回退 Tavily），`info_search_scholar`（OpenAlex：作者、年份、期刊、被引、摘要、开放获取 PDF）；电脑面板分别渲染为结果列表、图片网格、论文列表 |
 | 资料库分类：全部 / 文本和 PDF / 幻灯片 / 表格 / 图片 / 视频 / 音频 / 其他 | 同名分类（前端按扩展名归类） |
+| 自动化 → 触发器（事件 → 动作、自定义条件）、高级自动化（Beta）、`tab=updates` 动态 | `triggers.py`：webhook（`/api/hooks/<token>`，每 5 秒限一次）与条件触发（`watcher` 角色的只读 Agent，在独立沙箱 `watch-<id>` 里查证，需确认的操作一律拒绝，结果为 `{met, summary, state}`）；`/api/automations/parse` 把自然语言解析成定时任务或触发器；`/api/automations/activity` 汇总运行与检查 |
 | `ScheduledTask` / 自动化 | `scheduler.py`（once/interval/daily/weekly），`/api/schedules`、`schedule_create` 工具、"自动化"页面 |
 这些都是在同一个 Agent 内核上叠加的业务功能，事件协议里已预留扩展点（`toolUsed.tool` 新增类别即可）。
 

@@ -81,7 +81,8 @@ phrasings at once (e.g. Chinese and English) to widen coverage.
 - Use info_search_scholar for academic questions (cite DOIs), and info_search_image when a deliverable \
 needs pictures (credit the source page).
 - When the user wants something done repeatedly or at a later time ("每天早上 8 点…", "每周一…"), \
-create it with schedule_create instead of doing it once now; confirm the schedule to the user.
+create it with schedule_create instead of doing it once now; confirm the schedule to the user. When it \
+should happen on an event instead ("降价时提醒我", "有新版本发布就…", "收到告警时…"), use trigger_create.
 - <user_profile>, <custom_instructions> and <knowledge> system events describe the user and their \
 standing preferences; follow them. When the user states a lasting preference or fact about themselves or \
 their work ("以后报告都用中文", "我们公司用飞书"), propose it with knowledge_save once; never for one-off details.
@@ -187,6 +188,54 @@ IMPORT_SCHEMA = {
             "required": ["title", "content"], "additionalProperties": False}},
     },
     "required": ["nickname", "occupation", "about", "knowledge"],
+    "additionalProperties": False,
+}
+
+WATCHER_BRIEF = """\
+You are checking a condition for an automation. Find out, right now, whether it holds. Use search, \
+info_extract_webpage, the browser or the shell to look at the actual source; do not guess. You cannot \
+message anyone and nothing you do may have outside effects.
+
+Condition: {condition}
+
+What the previous check recorded: {previous}
+
+Current time: {now}
+
+If the condition is about a change ("降价", "有新的…", "超过…"), compare with the previous record; on the \
+first check, record the baseline and report met=false unless the condition already holds in absolute \
+terms. Finish by calling idle with `result` set to exactly one JSON object:
+{{"met": true|false, "summary": "<one or two sentences in the condition's language: what you saw>", \
+"state": "<the facts to compare against next time, e.g. current prices, latest item titles/dates>"}}
+"""
+
+AUTOMATION_PROMPT = """\
+Turn the user's description of an automation into a structured spec. Decide the type:
+- "schedule": runs at fixed times (每天 9 点, 每周一, 每 2 小时, 明天下午 3 点 once).
+- "condition": runs when something observable becomes true or changes (价格变化, 有新版本发布, 网站宕机); \
+needs a check interval in minutes (at least 10, default 60; pick longer for slow-changing things).
+- "webhook": runs when another system sends an event (收到飞书消息, CI 失败, 表单提交).
+`prompt` is the full, self-contained instruction for each run (what to do and what to deliver), in the \
+user's language. `title` is a short name. For schedules fill `schedule` (kind once|interval|daily|weekly; \
+at as ISO local datetime for once; everyMinutes; time HH:MM; weekday 0=Monday) using the current time \
+given below; leave unused fields empty or 0.
+"""
+
+AUTOMATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string", "enum": ["schedule", "condition", "webhook"]},
+        "title": {"type": "string"},
+        "prompt": {"type": "string"},
+        "condition": {"type": "string"},
+        "everyMinutes": {"type": "integer"},
+        "schedule": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["once", "interval", "daily", "weekly"]},
+            "at": {"type": "string"}, "everyMinutes": {"type": "integer"}, "time": {"type": "string"},
+            "weekday": {"type": "integer"}}, "required": ["kind", "at", "everyMinutes", "time", "weekday"],
+            "additionalProperties": False},
+    },
+    "required": ["type", "title", "prompt", "condition", "everyMinutes", "schedule"],
     "additionalProperties": False,
 }
 

@@ -81,8 +81,19 @@
 
       <div id="automations" class="hidden">
         <div class="lib-inner">
-          <div class="lib-head"><h2>自动化</h2><button class="btn primary" id="auto-new">新建定时任务</button></div>
-          <p class="auto-intro">让 OpenManus 按计划自动执行任务，每次运行都会创建一个新任务。也可以直接在对话里说「每天早上 8 点帮我……」。</p>
+          <div class="lib-head"><h2>自动化</h2>
+            <div class="more-wrap"><button class="btn primary" id="auto-new">新建</button>
+              <div class="more-menu right hidden" id="auto-new-menu">
+                <button class="mode-item" data-auto-new="schedule"><span data-icon="clock"></span>定时任务</button>
+                <button class="mode-item" data-auto-new="condition"><span data-icon="zap"></span>条件触发器</button>
+                <button class="mode-item" data-auto-new="webhook"><span data-icon="webhook"></span>Webhook 触发器</button>
+              </div></div></div>
+          <form class="nl-card" id="nl-form" autocomplete="off">
+            <div class="nl-head"><span data-icon="spark"></span>高级自动化<span class="badge">Beta</span><span class="muted">用你自己的话描述 OpenManus 应在何时做什么</span></div>
+            <textarea id="nl-text" rows="2" placeholder="例如：每个工作日早上 9 点汇总昨天的无人机行业新闻；或者：当 DJI 官网发布新机型时，整理参数对比发给我"></textarea>
+            <div class="nl-foot"><span class="sched-err" id="nl-err"></span><span class="spacer"></span><button class="btn primary sm" id="nl-go">创建</button></div>
+          </form>
+          <div class="lib-tabs" id="auto-tabs"></div>
           <div id="auto-list"></div>
         </div>
       </div>
@@ -209,6 +220,22 @@
         <div class="sched-err" id="sched-err"></div>
       </div>
       <div class="cc-actions"><button type="button" class="btn ghost" id="sched-cancel">取消</button><button type="submit" class="btn primary">保存</button></div>
+    </form>
+  </div>
+
+  <div id="trig-modal" class="hidden">
+    <form class="sched-card" id="trig-form" autocomplete="off">
+      <div class="viewer-head"><div class="viewer-title"><div id="trig-form-title" style="font-size:16px;font-weight:500">新建触发器</div></div><button type="button" class="icon-btn" id="trig-close" data-icon="x"></button></div>
+      <div class="sched-body">
+        <label>类型<select name="kind"><option value="condition">条件触发：条件满足时运行</option><option value="webhook">Webhook：外部系统发来事件时运行</option></select></label>
+        <label>名称<input name="title" placeholder="例如：竞品降价提醒" /></label>
+        <label data-for="condition">触发条件（用自然语言描述，OpenManus 会定期去查证）<textarea name="condition" rows="2" placeholder="例如：DJI 商城 Mavic 4 Pro 标准版的价格比上次检查时低"></textarea></label>
+        <label data-for="condition">检查间隔（分钟）<input type="number" name="everyMinutes" min="10" value="60" /></label>
+        <label>触发后要执行的指令<textarea name="prompt" rows="4" placeholder="例如：整理降价信息和历史价格，生成一页简报" required></textarea></label>
+        <div class="muted" data-for="webhook" style="font-size:12px">保存后会生成一个专属地址。向它 POST 任意 JSON 或文本，就会新建一个任务，请求内容作为上下文交给 OpenManus。</div>
+        <div class="sched-err" id="trig-err"></div>
+      </div>
+      <div class="cc-actions"><button type="button" class="btn ghost" id="trig-cancel">取消</button><button type="submit" class="btn primary">保存</button></div>
     </form>
   </div>
 

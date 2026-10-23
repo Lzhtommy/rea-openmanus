@@ -21,6 +21,7 @@ EFFORT = os.environ.get("MANUS_EFFORT", "high")
 SUBAGENT_EFFORT = os.environ.get("MANUS_SUBAGENT_EFFORT", "medium")
 MAX_TOKENS = int(os.environ.get("MANUS_MAX_TOKENS", "64000"))
 MAX_ITERATIONS = int(os.environ.get("MANUS_MAX_ITERATIONS", "200"))
+WATCHER_MAX_ITERATIONS = int(os.environ.get("MANUS_WATCHER_MAX_ITERATIONS", "25"))
 # Send reasoning_effort (LiteLLM maps it to Claude adaptive thinking; dropped for models without it).
 REASONING = _bool("MANUS_REASONING", True)
 # cache_control breakpoints on the system prompt and conversation tail (Anthropic prompt caching).

@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from . import config, providers
 from .providers import Profile
-from .prompts import IMPORT_PROMPT, IMPORT_SCHEMA, PLANNER_PROMPT, PLANNER_SCHEMA, SUGGEST_PROMPT, SUGGEST_SCHEMA, SYSTEM_PROMPT
+from .prompts import AUTOMATION_PROMPT, AUTOMATION_SCHEMA, IMPORT_PROMPT, IMPORT_SCHEMA, PLANNER_PROMPT, PLANNER_SCHEMA, SUGGEST_PROMPT, SUGGEST_SCHEMA, SYSTEM_PROMPT
 from .tools import TOOLS
 
 log = logging.getLogger("manus.llm")
@@ -373,3 +373,9 @@ async def import_memory(text: str, profile: Profile | None = None) -> dict | Non
     """Profile + knowledge items extracted from another assistant's memory export."""
     return await _structured("import_memory", IMPORT_PROMPT, IMPORT_SCHEMA,
                              f"<memory_export>\n{text[:30000]}\n</memory_export>", profile)
+
+
+async def parse_automation(text: str, now: str, profile: Profile | None = None) -> dict | None:
+    """A plain-language automation ("当 X 时做 Y", "每天早上…") as a schedule / condition / webhook spec."""
+    return await _structured("automation", AUTOMATION_PROMPT, AUTOMATION_SCHEMA,
+                             f"<now>{now}</now>\n<description>\n{text[:4000]}\n</description>", profile)
