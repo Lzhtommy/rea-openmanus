@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from . import config, connectors, llm, media, providers
-from .prompts import SUBAGENT_BRIEF
+from .prompts import DELEGATE_BRIEF, SUBAGENT_BRIEF
 from .sandbox import Sandbox, SandboxError
 from .search import search_images, search_scholar, search_web
 from .tools import PARALLEL_SAFE, REQUIRED, TOOL_NAMES, describe, is_allowed, needs_confirm, search_queries, ui_category
@@ -69,6 +69,7 @@ class AgentHost:
     def propose_knowledge(self, title: str, content: str) -> dict: raise NotImplementedError
     async def publish_site(self, sandbox, args: dict) -> dict: raise NotImplementedError
     def create_trigger(self, args: dict) -> dict: raise NotImplementedError
+    def team_member(self, name: str) -> dict | None: return None
     def skill_used(self, name: str) -> None: ...
     def preview_url(self, port: int) -> str: return ""
     def persist(self) -> None: ...
@@ -514,6 +515,30 @@ class Agent:
             state = "already remembered" if not k.get("pending") else "proposed to the user, who can accept or dismiss it"
             return ToolOutcome(f"Knowledge \"{k['title']}\" {state}. It applies to future tasks, not this one.",
                                {"knowledge": k})
+
+        # ---- agent teams
+        if name == "agent_delegate":
+            member = host.team_member(a["agent"])
+            if not member:
+                return ToolOutcome(f"No team member named \"{a['agent']}\". Use a name from <agent_team>.", is_error=True)
+            detail = {"agent": {k: member.get(k) for k in ("name", "color", "icon", "description")}, "task": a["task"]}
+            last = [0.0]
+
+            def progress(text: str):
+                if last[0] >= 0 and time.time() - last[0] > 1.5:  # never after the final event (-1 = finished)
+                    last[0] = time.time()
+                    asyncio.get_event_loop().create_task(host.emit({**base, "id": base["actionId"], "status": "running",
+                                                                    "detail": {"delegate": {**detail, "progress": text}}}))
+            sub = Agent(host, sb, [{"role": "user", "content": DELEGATE_BRIEF.format(
+                name=member["name"], instructions=member["instructions"], task=a["task"])}],
+                role="subagent", profile=self.profile, on_progress=progress)
+            try:
+                await sub.run()
+            finally:
+                last[0] = -1
+            result = sub.result or "(no result)"
+            return ToolOutcome(f"{member['name']} reports:\n{result}", {"delegate": {**detail, "result": result[:20000]}},
+                               is_error=result.startswith("ERROR:"))
 
         # ---- wide research
         if name == "agent_map_reduce":

@@ -17,7 +17,7 @@ import logging
 import time
 from pathlib import Path
 
-from . import config, connectors, llm, personal, projects, providers, skills
+from . import agents as agents_mod, config, connectors, llm, personal, projects, providers, skills
 from .agent import Agent, AgentHost, now_ms, render_plan, short_id
 from .sandbox import manager
 
@@ -44,6 +44,9 @@ class Session(AgentHost):
         self.trigger_id: str | None = None  # set when a trigger (webhook / condition) started this session
         self.computer_id: str | None = None  # runs on this cloud computer instead of its own sandbox
         self.device_id: str | None = None  # runs on the user's own computer (device connector)
+        self.agent_id: str | None = None  # custom agent whose role this task works in
+        self.team_id: str | None = None  # agent team this task is led for
+        self.role_announced = False
         self.project_id: str | None = None  # project this task belongs to (instructions + files)
         self.project_announced = False
         self.share: dict | None = None  # {token, createdAt}: public read-only replay link
@@ -77,7 +80,7 @@ class Session(AgentHost):
 
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
-                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id, "triggerId": self.trigger_id, "computerId": self.computer_id, "deviceId": self.device_id,
+                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id, "triggerId": self.trigger_id, "computerId": self.computer_id, "deviceId": self.device_id, "agentId": self.agent_id, "teamId": self.team_id,
                 "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id}
 
     def persist(self) -> None:
@@ -85,7 +88,8 @@ class Session(AgentHost):
                                                         "files": self.files, "share": self.share,
                                                         "mrCache": self.map_reduce_cache,
                                                         "projectAnnounced": self.project_announced,
-                                                        "personalNote": self.personal_note, "skillsNote": self.skills_note}, ensure_ascii=False))
+                                                        "personalNote": self.personal_note, "skillsNote": self.skills_note,
+                                                        "roleAnnounced": self.role_announced}, ensure_ascii=False))
         (self.dir / "messages.json").write_text(json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
@@ -99,6 +103,8 @@ class Session(AgentHost):
         s.trigger_id = meta.get("triggerId")
         s.computer_id = meta.get("computerId")
         s.device_id = meta.get("deviceId")
+        s.agent_id, s.team_id = meta.get("agentId"), meta.get("teamId")
+        s.role_announced = meta.get("roleAnnounced", False)
         s.model_selection = meta.get("model") or {}
         s.share = meta.get("share")
         s.project_id = meta.get("projectId")
@@ -236,6 +242,13 @@ class Session(AgentHost):
         return await sites.store.publish(sandbox, self.session_id, a["path"], a.get("title", ""), a.get("kind") or "website",
                                          a.get("description") or "")
 
+    def team_member(self, name: str) -> dict | None:
+        if not agents_mod.store:
+            return None
+        if self.team_id:
+            return agents_mod.store.member(self.team_id, name)
+        return agents_mod.store.member(None, name) if self.agent_id else None
+
     def propose_knowledge(self, title: str, content: str) -> dict:
         return personal.store.add(title, content, source="agent", session_id=self.session_id, pending=True)
 
@@ -359,6 +372,14 @@ class Session(AgentHost):
             if (catalog := skills.store.catalog(sandbox)) != self.skills_note:
                 system_notes.append(catalog or "<skills>\nNo skills are enabled now.\n</skills>")
                 self.skills_note = catalog
+            if (self.agent_id or self.team_id) and not self.role_announced and agents_mod.store:
+                note = agents_mod.store.team_note(self.team_id) if self.team_id else agents_mod.store.role_note(self.agent_id)
+                role_skills = sorted(self.picked_skills)
+                if note and role_skills:
+                    note += "\nSkills for this role, read before starting:\n" + "\n".join(f"- {self._skills_dir()}/{n}/SKILL.md" for n in role_skills)
+                if note:
+                    system_notes.append(note)
+                self.role_announced = True
             if personal.store and (note := personal.store.note()) != self.personal_note:
                 system_notes.append(note or "<user_profile>\nThe user cleared their profile, instructions and knowledge; "
                                     "disregard what was said about them earlier.\n</user_profile>")

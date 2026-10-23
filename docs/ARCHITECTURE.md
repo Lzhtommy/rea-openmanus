@@ -211,6 +211,7 @@ webdev 全栈托管（自定义域名、Stripe 等）、Connectors 和 MCP 市�
 | `/app/computers` 电脑（模板、自定义配置、连接设备）、"在以下电脑上运行此任务" | `computers.py`：电脑即沙箱 `pc-<id>`，`SandboxManager.specs` 指定 CPU、内存与空闲策略（默认不回收）；模板在创建后执行一次安装命令；会话的 `sandbox_id` 指向电脑，同一台电脑上的任务共享文件与服务；开放端口按 Host 头 `pc-<id>-<port>.<域名>` 代理到沙箱；记录开关机意图，后端重启后自动重连 |
 | 连接新计算机、"本地计算机"运行、My Browser、`confirm_local_terminal_execution` | `devices.py` + `device/openmanus_device.py`：连接器在本机启动 `sandbox/server.py`，经 `/api/devices/connect` WebSocket 转发 HTTP；`DeviceTransport`（httpx 传输层）让 `dev-<id>` 成为普通沙箱；令牌只显示一次、哈希存储；本机上的 shell / 写文件逐条确认；`BROWSER_CDP_URL` 让动作服务接管用户自己的 Chrome |
 | Computer Use 页（此计算机上的 Manus、My Browser、技能录制器） | `recordings.py` + 沙箱 `/browser/record/*`：注入记录脚本（`expose_binding` + `add_init_script`，跨页面跳转保留），元素用可见文字描述、从不记录字段值和密码；`llm.draft_recorded_skill` 结构化输出 SKILL.md 草稿；云端录制使用一次性沙箱 `rec-<id>`，结束即销毁 |
+| Agent 页（已迁移到 Cue：自定义 Agent、Agent 团队）；`toolUsed.tool: agent` | `agents.py`：Agent = 角色（指令、默认模式与技能），以 `<agent_role>` 系统消息注入；团队任务由负责人执行，`<agent_team>` 列出成员，`agent_delegate` 以成员指令运行子代理（可并行），面板展示子任务与结果 |
 | `ScheduledTask` / 自动化 | `scheduler.py`（once/interval/daily/weekly），`/api/schedules`、`schedule_create` 工具、"自动化"页面 |
 这些都是在同一个 Agent 内核上叠加的业务功能，事件协议里已预留扩展点（`toolUsed.tool` 新增类别即可）。
 

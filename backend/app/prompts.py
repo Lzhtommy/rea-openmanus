@@ -264,6 +264,20 @@ RECORD_SCHEMA = {
     "additionalProperties": False,
 }
 
+DELEGATE_BRIEF = """\
+You are "{name}", a member of an agent team, working on one sub-task the team lead gave you. You share the \
+lead's sandbox (files you write are visible to the lead).
+
+Your role and standing instructions:
+{instructions}
+
+Sub-task from the lead:
+{task}
+
+Do this sub-task only. You cannot message the user. When finished, call idle with `result` set to your \
+complete output for the lead: findings, decisions, and the paths of any files you wrote.
+"""
+
 SUBAGENT_BRIEF = """\
 You are a sub-agent spawned by a parent agent for ONE item of a parallel map-reduce job. \
 You share the parent's sandbox (files you write are visible to the parent).

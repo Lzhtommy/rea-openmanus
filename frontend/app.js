@@ -63,6 +63,7 @@ const ICONS = {
   sparkBox: '<rect width="18" height="18" x="3" y="3" rx="4"/><path d="M12 7.5l1.2 3.3 3.3 1.2-3.3 1.2L12 16.5l-1.2-3.3L7.5 12l3.3-1.2z"/>',
   gamepad: '<path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><rect width="20" height="12" x="2" y="6" rx="6"/>',
   phone: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
   record: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
   laptop: '<rect width="18" height="12" x="3" y="4" rx="2"/><path d="M2 20h20"/>',
   presentation: '<path d="M2 3h20M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3M7 21l5-5 5 5"/>',
@@ -117,13 +118,14 @@ const TOOL = {
   schedule: { icon: "clock", use: "自动化" },
   mcp: { icon: "plug", use: "连接器" },
   knowledge: { icon: "brain", use: "知识" },
+  agent: { icon: "users", use: "团队成员", round: true },
   slides: { icon: "presentation", use: "幻灯片" },
   media: { icon: "image", use: "生成工具" },
 };
 const ACTION_ZH = {
   "Executing command": "执行命令", "Checking terminal": "查看终端", Browsing: "浏览", Typing: "输入", Clicking: "点击",
   "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务", "Searching tools": "搜索工具", "Using MCP": "调用工具", "Saving knowledge": "提议记住", "Searching images": "搜索图片", "Searching papers": "搜索论文",
-  "Exporting slides": "渲染幻灯片", "Publishing site": "发布站点", "Generating image": "生成图片", "Generating speech": "生成语音", "Generating video": "生成视频",
+  "Exporting slides": "渲染幻灯片", Delegating: "委派给", "Publishing site": "发布站点", "Generating image": "生成图片", "Generating speech": "生成语音", "Generating video": "生成视频",
   Searching: "搜索", "Reading webpage": "提取网页", "Running parallel sub-agents": "并行执行子任务", "Exposing port": "部署预览",
 };
 const zh = (a) => ACTION_ZH[a] || a || "";
@@ -143,6 +145,7 @@ const S = {
   plugins: { plugins: [], categories: [] }, plugCat: "all", plugOpen: null, sites: [], crTab: "all",
   pcs: { computers: [], templates: [], unavailable: [], tasks: {} }, pcOpen: null, pcTab: "desktop", target: null,
   devs: { devices: [], tasks: {} }, pairing: null, rec: null,
+  ags: { agents: [], teams: [] }, agTab: "agents", agEdit: null, crew: null,
   triggers: [], activity: [], autoTab: "activity", editingTrig: null,
   skills: { skills: [], catalog: [], categories: [] }, skTab: "explore", skCat: "all", skSrc: "all", pickedSkills: [], skillView: null,
 };
@@ -265,8 +268,10 @@ function scheduleRender(scrollEnd = false) {
 
 function renderAll() {
   const auto = S.view === "automations", conn = S.view === "connectors", plug = S.view === "plugins", cr = S.view === "creations", pcv = S.view === "computers";
-  const proj = S.view === "project", pers = S.view === "personal", sk = S.view === "skills", cu = S.view === "computeruse";
-  const lib = S.view === "library" || auto || conn || proj || pers || sk || plug || cr || pcv || cu; // full-page views without a composer dock
+  const proj = S.view === "project", pers = S.view === "personal", sk = S.view === "skills", cu = S.view === "computeruse", agv = S.view === "agents";
+  const lib = S.view === "library" || auto || conn || proj || pers || sk || plug || cr || pcv || cu || agv; // full-page views without a composer dock
+  $("#agents").classList.toggle("hidden", !agv);
+  $("#nav-agents").classList.toggle("active", agv);
   $("#computeruse").classList.toggle("hidden", !cu);
   $("#computers").classList.toggle("hidden", !pcv);
   $("#nav-pc").classList.toggle("active", pcv);
@@ -288,10 +293,12 @@ function renderAll() {
   $("#dock").classList.toggle("hidden", home || lib);
   $("#nav-library").classList.toggle("active", S.view === "library");
   (proj ? $("#proj-slot") : home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  $("#composer").classList.toggle("hidden", pers || sk || plug || conn || cr || pcv || cu);
-  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : cu ? "Computer Use" : sk ? "技能" : plug ? "插件" : cr ? "创作" : pcv ? "电脑" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  $("#composer").classList.toggle("hidden", pers || sk || plug || conn || cr || pcv || cu || agv);
+  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : cu ? "Computer Use" : agv ? "Agent" : sk ? "技能" : plug ? "插件" : cr ? "创作" : pcv ? "电脑" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
   const meta = S.current && S.sessions.find((x) => x.id === S.current);
+  const crewLabel = meta?.teamId ? S.ags.teams.find((t) => t.id === meta.teamId)?.name : meta?.agentId ? S.ags.agents.find((a) => a.id === meta.agentId)?.name : "";
+  if (crewLabel) $("#session-title").insertAdjacentHTML("beforeend", `<span class="lib-tag pc-chip">${icon("users")}${esc(crewLabel)}</span>`);
   const pcName = (meta?.computerId && (S.pcs.computers.find((c) => c.id === meta.computerId)?.name || "云电脑")) ||
     (meta?.deviceId && (S.devs.devices.find((d) => d.id === meta.deviceId)?.name || "本地计算机"));
   if (pcName) $("#session-title").insertAdjacentHTML("beforeend", `<span class="lib-tag pc-chip">${icon("monitor")}${esc(pcName)}</span>`);
@@ -308,6 +315,7 @@ function renderAll() {
   if (pers) { renderPersonal(); renderPanel(); return; }
   if (sk) { renderSkills(); renderPanel(); return; }
   if (cu) { renderPanel(); return; }
+  if (agv) { renderAgents(); renderPanel(); return; }
   if (lib) { renderLibrary(); renderPanel(); return; }
   if (home) { renderPanel(); return; }
 
@@ -434,6 +442,7 @@ function summarize(steps) {
     else if (n === "shell_exec") c.cmd++;
     else if (n.startsWith("shell_")) c.term++;
     else if (n === "agent_map_reduce") c.mr++;
+    else if (n === "agent_delegate") c.dg = (c.dg || 0) + 1;
     else if (n === "deploy_publish") c.pub = (c.pub || 0) + 1;
     else if (n.startsWith("deploy_")) c.dep++;
     else if (n.startsWith("schedule_")) c.sched = (c.sched || 0) + 1;
@@ -456,6 +465,7 @@ function summarize(steps) {
   if (c.read.size) parts.push(`读取了 ${c.read.size} 个文件`);
   if (c.find) parts.push(`搜索了 ${c.find} 次文件`);
   if (c.mr) parts.push(`并行执行了 ${c.mr} 批子任务`);
+  if (c.dg) parts.push(`委派了 ${c.dg} 个子任务`);
   if (c.dep) parts.push(`部署了 ${c.dep} 个服务`);
   if (c.pub) parts.push(`发布了 ${c.pub} 次站点`);
   if (c.sched) parts.push(`创建了 ${c.sched} 个定时任务`);
@@ -682,6 +692,12 @@ function stepView(s) {
   if (d.mcp) return `<div class="file-head">${icon("plug")}<span class="grow">${esc(d.mcp.server)} · ${esc(d.mcp.action)}</span></div>` +
     `<div class="page-md"><div class="mcp-label">参数</div><pre class="cc-cmd">${esc(d.mcp.argumentsPreview)}</pre><div class="mcp-label">结果</div><pre class="cc-cmd mcp-out">${esc(d.mcp.resultPreview)}</pre></div>`;
   if (d.knowledge) return `<div class="mr">${knowCardHtml(d.knowledge)}</div>`;
+  if (d.delegate) {
+    const g = d.delegate, a = g.agent || {};
+    return `<div class="mr"><div class="dg-head">${agAvatar(a)}<div><b>${esc(a.name)}</b><div class="muted" style="font-size:12px">${esc(a.description || "")}</div></div></div>` +
+      `<div class="mcp-label">子任务</div><div class="auto-prompt" style="-webkit-line-clamp:unset">${esc(g.task)}</div>` +
+      (g.result ? `<div class="mcp-label">结果</div><div class="prose">${md(g.result)}</div>` : `<div class="check-row"><span class="spin">${icon("loader")}</span>${esc(g.progress || "工作中…")}</div>`) + `</div>`;
+  }
   if (d.slides) return slidesViewHtml(s);
   if (d.media) {
     const m = d.media;
@@ -993,6 +1009,66 @@ function openComputerUse() {
   S.current = null; resetSession(); S.view = "computeruse";
   history.replaceState(null, "", "#computeruse");
   renderSessions(); hydrateIcons($("#computeruse")); scheduleRender();
+}
+
+// ---- agents & teams
+const agAvatar = (a) => `<span class="ag-av" style="background:${esc(a.color || "#4b5563")}">${esc(a.icon || (a.name || "?").slice(0, 1))}</span>`;
+async function loadAgents() { try { S.ags = await (await fetch("/api/agents")).json(); } catch { /* keep */ } }
+async function openAgents() {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "agents";
+  history.replaceState(null, "", "#agents");
+  renderSessions(); await loadAgents(); await loadSkills(); scheduleRender();
+}
+function renderAgents() {
+  const { agents, teams } = S.ags, byId = Object.fromEntries(agents.map((a) => [a.id, a]));
+  $("#ag-tabs").innerHTML = [["agents", `我的 Agent<span>${agents.length}</span>`], ["teams", `团队<span>${teams.length}</span>`]].map(([k, l]) => `<button class="lib-tab ${S.agTab === k ? "on" : ""}" data-agtab="${k}">${l}</button>`).join("");
+  const foot = (kind, id) => `<div class="sk-meta"><span class="spacer"></span><button class="btn primary sm" data-ag-run="${kind}:${esc(id)}">${icon("newTask")}开始任务</button><button class="icon-btn sm" data-ag-edit="${kind}:${esc(id)}" title="编辑">${icon("pencil")}</button><button class="icon-btn sm" data-ag-del="${kind}:${esc(id)}" title="删除">${icon("trash")}</button></div>`;
+  if (S.agTab === "agents") {
+    $("#ag-list").innerHTML = agents.map((a) => `<div class="sk-card"><div class="sk-top">${agAvatar(a)}<div class="sk-title">${esc(a.name)}<div class="sk-name">${esc({ max: "Max", standard: "标准", lite: "Lite" }[a.mode] || "默认模式")}${a.skills.length ? ` · ${a.skills.length} 个技能` : ""}</div></div></div><div class="sk-desc">${esc(a.description || a.instructions)}</div>${foot("agent", a.id)}</div>`).join("")
+      || `<div class="lib-empty" style="grid-column:1/-1">${icon("users")}<div>还没有 Agent</div><div class="muted">创建一个有专门职责的 Agent，例如"行业研究员""周报撰写员"</div></div>`;
+  } else {
+    $("#ag-list").innerHTML = teams.map((t) => `<div class="sk-card"><div class="sk-top"><span class="ag-stack">${t.members.slice(0, 4).map((m) => byId[m] ? agAvatar(byId[m]) : "").join("")}</span><div class="sk-title">${esc(t.name)}<div class="sk-name">${t.members.length} 位成员${byId[t.lead] ? ` · 负责人 ${esc(byId[t.lead].name)}` : ""}</div></div></div><div class="sk-desc">${esc(t.description || t.members.map((m) => byId[m]?.name).filter(Boolean).join("、"))}</div>${foot("team", t.id)}</div>`).join("")
+      || `<div class="lib-empty" style="grid-column:1/-1">${icon("users")}<div>还没有团队</div><div class="muted">至少创建两个 Agent，再把它们组成团队</div></div>`;
+  }
+}
+function openAgForm(kind, item) {
+  S.agEdit = { kind, id: item?.id || null };
+  $("#ag-form-title").textContent = (item ? "编辑" : kind === "team" ? "组建" : "创建") + (kind === "team" ? "团队" : " Agent");
+  $("#ag-err").textContent = "";
+  const v = item || {};
+  if (kind === "agent") {
+    const sks = S.skills.skills.map((x) => `<label class="check"><input type="checkbox" name="skills" value="${esc(x.name)}" ${(v.skills || []).includes(x.name) ? "checked" : ""} />${esc(x.title)}</label>`).join("");
+    $("#ag-form-body").innerHTML = `<div class="sched-row"><label style="flex:0 0 90px">图标<input name="icon" maxlength="2" placeholder="🔍" value="${esc(v.icon || "")}" /></label><label>名称<input name="name" placeholder="例如：行业研究员" value="${esc(v.name || "")}" /></label></div>` +
+      `<label>一句话介绍（团队负责人据此分派任务）<input name="description" placeholder="擅长检索一手资料、核实数据" value="${esc(v.description || "")}" /></label>` +
+      `<label>职责与工作要求<textarea name="instructions" rows="6" placeholder="你是……；工作时要……；交付物格式……">${esc(v.instructions || "")}</textarea></label>` +
+      `<label>默认模式<select name="mode"><option value="">跟随当前选择</option><option value="max" ${v.mode === "max" ? "selected" : ""}>Max</option><option value="standard" ${v.mode === "standard" ? "selected" : ""}>标准</option><option value="lite" ${v.mode === "lite" ? "selected" : ""}>Lite</option></select></label>` +
+      (sks ? `<div class="mcp-label">常用技能</div><div class="sk-cat-pick">${sks}</div>` : "");
+  } else {
+    const opts = S.ags.agents.map((a) => `<label class="check"><input type="checkbox" name="members" value="${esc(a.id)}" ${(v.members || []).includes(a.id) ? "checked" : ""} />${esc(a.name)}</label>`).join("");
+    $("#ag-form-body").innerHTML = `<label>团队名称<input name="name" placeholder="例如：内容小组" value="${esc(v.name || "")}" /></label>` +
+      `<label>团队介绍<input name="description" placeholder="负责行业研究和报告撰写" value="${esc(v.description || "")}" /></label>` +
+      `<div class="mcp-label">成员</div><div class="sk-cat-pick">${opts || '<span class="muted">请先创建 Agent</span>'}</div>` +
+      `<label>负责人（负责拆分和汇总；不选则由默认 Agent 担任）<select name="lead"><option value="">默认</option>${S.ags.agents.map((a) => `<option value="${esc(a.id)}" ${v.lead === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></label>`;
+  }
+  $("#ag-modal").classList.remove("hidden");
+}
+async function saveAg(e) {
+  e.preventDefault();
+  const f = e.target, { kind, id } = S.agEdit;
+  const body = kind === "agent"
+    ? { name: f.name.value, icon: f.icon.value, description: f.description.value, instructions: f.instructions.value, mode: f.mode.value, skills: [...f.querySelectorAll("[name=skills]:checked")].map((n) => n.value) }
+    : { name: f.name.value, description: f.description.value, lead: f.lead.value, members: [...f.querySelectorAll("[name=members]:checked")].map((n) => n.value) };
+  const base = kind === "agent" ? "/api/agents" : "/api/teams";
+  const r = await fetch(id ? `${base}/${id}` : base, { method: id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) { $("#ag-err").textContent = (await r.json().catch(() => ({}))).detail || "保存失败"; return; }
+  $("#ag-modal").classList.add("hidden"); S.agTab = kind === "agent" ? "agents" : "teams";
+  await loadAgents(); renderAgents();
+}
+function crewName() {
+  if (!S.crew) return "";
+  const [k, id] = S.crew.split(":");
+  return (k === "team" ? S.ags.teams : S.ags.agents).find((x) => x.id === id)?.name || "";
 }
 
 // ---- skill recorder (技能录制器)
@@ -1840,7 +1916,9 @@ function goHome() { openSession(null); $("#input").focus(); }
 async function ensureSession() {
   if (S.current) return S.current;
   const projectId = S.view === "project" ? S.projectId : null; // a task started from a project page joins it
-  const s = await (await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, ...(S.target?.startsWith("dev:") ? { deviceId: S.target.slice(4) } : { computerId: S.target }) }) })).json();
+  const s = await (await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, ...(S.target?.startsWith("dev:") ? { deviceId: S.target.slice(4) } : { computerId: S.target }),
+    ...(S.crew ? { [S.crew.startsWith("team:") ? "teamId" : "agentId"]: S.crew.split(":")[1] } : {}) }) })).json();
+  S.crew = null;
   S.target = null;
   S.sessions.unshift(s);
   openSession(s.id);
@@ -1864,7 +1942,7 @@ async function submit(text) {
 function autoGrow() { const i = $("#input"); i.style.height = "auto"; i.style.height = Math.min(i.scrollHeight, 240) + "px"; }
 function renderAttachments() {
   const pc = S.target && (S.target.startsWith("dev:") ? S.devs.devices.find((d) => "dev:" + d.id === S.target) : S.pcs.computers.find((c) => c.id === S.target));
-  $("#attach-list").innerHTML = (pc ? `<span class="chip-file target">${icon(S.target.startsWith("dev:") ? "laptop" : "monitor")}<span>在「${esc(pc.name)}」上运行</span><button type="button" data-rmtarget="1">${icon("x")}</button></span>` : "") + S.pickedSkills.map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span><button type="button" data-rmskill="${esc(n)}">${icon("x")}</button></span>`).join("") + S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
+  $("#attach-list").innerHTML = (S.crew ? `<span class="chip-file target">${icon("users")}<span>与「${esc(crewName())}」一起</span><button type="button" data-rmcrew="1">${icon("x")}</button></span>` : "") + (pc ? `<span class="chip-file target">${icon(S.target.startsWith("dev:") ? "laptop" : "monitor")}<span>在「${esc(pc.name)}」上运行</span><button type="button" data-rmtarget="1">${icon("x")}</button></span>` : "") + S.pickedSkills.map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span><button type="button" data-rmskill="${esc(n)}">${icon("x")}</button></span>`).join("") + S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
 }
 
 // ------------------------------------------------------------------ theme ---
@@ -1882,6 +1960,7 @@ function bind() {
   $("#input").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if ($("#input").value.trim()) submit($("#input").value); } };
   $("#attach-list").onclick = (e) => {
     if (e.target.closest("[data-rmtarget]")) { S.target = null; renderAttachments(); return; }
+    if (e.target.closest("[data-rmcrew]")) { S.crew = null; renderAttachments(); return; }
     const k = e.target.closest("[data-rmskill]"); if (k) { S.pickedSkills = S.pickedSkills.filter((n) => n !== k.dataset.rmskill); renderAttachments(); return; }
     const b = e.target.closest("[data-rm]"); if (b) { S.attachments.splice(+b.dataset.rm, 1); renderAttachments(); }
   };
@@ -1921,6 +2000,18 @@ function bind() {
   $("#nav-conn").onclick = openPlugins;
   $("#nav-create").onclick = openCreations;
   $("#nav-pc").onclick = openComputers;
+  $("#nav-agents").onclick = openAgents;
+  $("#ag-new").onclick = async () => { await loadSkills(); openAgForm("agent"); };
+  $("#ag-new-team").onclick = () => openAgForm("team");
+  $("#ag-tabs").onclick = (e) => { const b = e.target.closest("[data-agtab]"); if (b) { S.agTab = b.dataset.agtab; renderAgents(); } };
+  $("#ag-form").onsubmit = saveAg;
+  $("#ag-close").onclick = $("#ag-cancel").onclick = () => $("#ag-modal").classList.add("hidden");
+  $("#ag-list").onclick = async (e) => {
+    const run = e.target.closest("[data-ag-run]"), ed = e.target.closest("[data-ag-edit]"), del = e.target.closest("[data-ag-del]");
+    if (run) { goHome(); S.crew = run.dataset.agRun; renderAttachments(); $("#input").focus(); return; }
+    if (ed) { const [k, id] = ed.dataset.agEdit.split(":"); openAgForm(k, (k === "team" ? S.ags.teams : S.ags.agents).find((x) => x.id === id)); return; }
+    if (del) { const [k, id] = del.dataset.agDel.split(":"); if (!confirm("确定删除？")) return; await fetch(`/api/${k === "team" ? "teams" : "agents"}/${id}`, { method: "DELETE" }); await loadAgents(); renderAgents(); }
+  };
   $("#pc-new").onclick = () => openPcNew();
   $("#pc-templates").onclick = (e) => { const t = e.target.closest("[data-pc-tpl]"); if (t) openPcNew(t.dataset.pcTpl); };
   $("#pc-mine").onclick = (e) => { const t = e.target.closest("[data-pc-task]"); if (t) { e.stopPropagation(); return newTaskOn(t.dataset.pcTask); } const c = e.target.closest("[data-pc]"); if (c) openPcView(c.dataset.pc, "desktop"); };
@@ -1967,7 +2058,7 @@ function bind() {
       const port = +$("#pcv-port").value; if (!port) return;
       const r = await fetch(`/api/computers/${c.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ports: [...c.ports.map(({ port, label }) => ({ port, label })), { port }] }) });
       if (!r.ok) { $("#pcv-port-err").textContent = (await r.json().catch(() => ({}))).detail || "开放失败"; return; }
-      loadComputers();
+      loadComputers(); loadAgents();
     }
     if (e.target.id === "pcv-settings") {
       await fetch(`/api/computers/${c.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: e.target.name.value, autoStop: +e.target.autoStop.value }) });
@@ -2258,6 +2349,7 @@ async function deleteSession(sid) {
   else if (sid === "creations") openCreations();
   else if (sid === "computers") openComputers();
   else if (sid === "computeruse") openComputerUse();
+  else if (sid === "agents") openAgents();
   else if (sid === "personal") openPersonal();
   else if (sid === "skills") openSkills();
   else if (sid.startsWith("project/")) openProject(sid.slice(8));

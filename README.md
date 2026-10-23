@@ -6,7 +6,7 @@
 
 ## 功能
 - **Agent Loop**：分析事件 → 选择工具 → 沙箱执行 → 观察 → 迭代 → 交付 → idle
-- **42 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`（一次 1–3 个查询并发）、`info_search_image`（图片）、`info_search_scholar`（OpenAlex 学术文献）、`info_extract_webpage`、`deploy_expose_port`、`deploy_publish`、`message_*`、`plan_update`、`agent_map_reduce`、`schedule_create`、`trigger_create`、`knowledge_save`、`slides_export`、`media_generate_image/speech/video`、`mcp_*`、`idle`
+- **43 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`（一次 1–3 个查询并发）、`info_search_image`（图片）、`info_search_scholar`（OpenAlex 学术文献）、`info_extract_webpage`、`deploy_expose_port`、`deploy_publish`、`message_*`、`plan_update`、`agent_map_reduce`、`agent_delegate`、`schedule_create`、`trigger_create`、`knowledge_save`、`slides_export`、`media_generate_image/speech/video`、`mcp_*`、`idle`
 - **并行工具调用**：一轮里如果全是只读调用（搜索、网页提取、读文件），就并发执行
 - **Planner 模块**：结构化输出生成计划
 - **技能**（"更多 → 技能"）：官方技能（`backend/skills/`）、个人技能（手动编写、上传 SKILL.md/zip、或让 Agent 用内置的技能创建器写好后在文件卡片上"添加到我的技能"）、第三方技能（从 GitHub 目录导入，探索页有精选目录）；可启用/停用、在线编辑、统计使用次数；输入框"+ → 使用技能"把技能指定给当前消息（对应 Manus 的 `enabledSkills`）。启用的技能整目录装进沙箱，上下文里只放名称和触发说明，Agent 按需读取
@@ -25,6 +25,7 @@
 - **Wide Research 控制**：运行中可停止/重试单个子任务、强制继续；已完成项可在重跑时复用
 - **项目**：项目指令 + 项目文件，项目内的任务自动获得指令并把文件复制到沙箱 `~/project/`
 - **沙箱回收**：空闲（默认 15 分钟）且无人观看、任务不在运行的沙箱自动停止，保留文件，下次使用自动启动
+- **Agent 与团队**：侧栏"Agent"创建有专门职责的 Agent（名称、图标、介绍、职责与要求、默认模式、常用技能），并组建团队（成员 + 负责人）。与 Agent 开始的任务按它的角色工作；交给团队的任务由负责人拆分，用 `agent_delegate` 把子任务派给成员（同一轮多个委派并行），成员以各自的指令在同一沙箱中工作并回报，负责人汇总交付
 - **电脑（云电脑）**：创建长期存在的电脑（模板：运行自动化、构建并托管应用、Blender 渲染、游戏服务器、数据处理工作站、自定义；可选 CPU / 内存，空闲自动关机或始终在线）。文件、软件和后台服务跨任务保留；可在"电脑"页查看桌面（noVNC，可直接操作）、使用终端、开放端口（固定的独立域名地址 `pc-<id>-<端口>.<域名>`）、开关机；输入框"+ → 运行位置"让任务在指定电脑上运行；后端重启后自动重新连接仍在运行的电脑
 - **连接本机（本地计算机 / My Browser）**："电脑 → 连接新计算机"生成一次性令牌和三条命令；在自己的电脑上运行 `device/openmanus_device.py`，它在本机启动动作服务，并通过一条主动发起的 WebSocket 隧道让 OpenManus 调用（本机不开放任何端口）。任务可选择在这台电脑上运行；每条命令、每次写文件都先请你确认（可对设备开启"信任"）；技能装在隐藏目录 `.openmanus/skills`。加 `--my-browser http://127.0.0.1:9222` 时，Agent 在你自己的 Chrome 里新开标签页工作，沿用你的登录状态
 - **技能录制器**（"更多 → Computer Use"，或"技能 → 创建 → 录制工作流"）：在云端浏览器（弹窗里直接操作实时画面）或已连接设备上你自己的 Chrome 里演示一遍流程；页面脚本记录打开的页面、点击的元素和填写的内容（密码等敏感字段只记"需要询问用户"），停止后由模型把它概括成带参数的 SKILL.md 草稿，检查修改后保存为个人技能

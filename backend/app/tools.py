@@ -164,6 +164,12 @@ _TOOLS = [
         "output_file_pattern": {"type": "string",
                                 "description": "Optional per-item output path, may contain {index}"}},
        ["instruction", "items"]),
+    _t("agent_delegate",
+       "Hand a sub-task to a member of your agent team (see <agent_team>) and get their result. The member works "
+       "in its own role in this sandbox. Several delegations in one turn run in parallel.",
+       {"agent": {"type": "string", "description": "The member's name"},
+        "task": {"type": "string", "description": "Self-contained sub-task: goal, inputs, files to use, expected output"}},
+       ["agent", "task"]),
     # ---- MCP connectors (tools are discovered on demand, not listed here)
     _t("mcp_search_tools",
        "Search the tools of the user's connected MCP servers (see <connectors>). Returns matching tools with "
@@ -252,7 +258,7 @@ def needs_confirm(name: str, args: dict) -> str | None:
 
 # Read-only tools without shared state. When every call in a turn is one of these they
 # run concurrently (Manus fires several webpage_extract / search calls at once).
-PARALLEL_SAFE = {"media_generate_image", "media_generate_speech", "info_search_web", "info_search_image", "info_search_scholar", "info_extract_webpage", "file_read", "file_find_in_content", "mcp_search_tools",
+PARALLEL_SAFE = {"agent_delegate", "media_generate_image", "media_generate_speech", "info_search_web", "info_search_image", "info_search_scholar", "info_extract_webpage", "file_read", "file_find_in_content", "mcp_search_tools",
                  "file_find_by_name"}
 
 
@@ -285,6 +291,8 @@ def ui_category(name: str) -> str:
         return "webpage_extract"
     if name == "agent_map_reduce":
         return "map_reduce"
+    if name == "agent_delegate":
+        return "agent"
     if name.startswith("deploy_"):
         return "deploy"
     if name.startswith(("schedule_", "trigger_")):
@@ -342,6 +350,8 @@ def describe(name: str, args: dict) -> tuple[str, str]:
         return "Reading webpage", args.get("url", "")
     if name == "agent_map_reduce":
         return "Running parallel sub-agents", f"{len(args.get('items', []))} items"
+    if name == "agent_delegate":
+        return "Delegating", args.get("agent", "")
     if name == "deploy_expose_port":
         return "Exposing port", str(args.get("port", ""))
     if name == "deploy_publish":

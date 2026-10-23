@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import computers, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import agents, computers, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
     computers.store = computers.Computers()
     devices.store = devices.Devices()
     recordings.store = recordings.Recordings()
+    agents.store = agents.Agents()
     asyncio.create_task(computers.store.resume())
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
@@ -97,6 +98,19 @@ async def create_session(body: dict | None = None):
         s.persist()
     elif did and devices.store and did in devices.store.items:
         s.device_id = did
+        s.persist()
+    aid, tid = (body or {}).get("agentId"), (body or {}).get("teamId")
+    if tid and tid in agents.store.teams:
+        t = agents.store.teams[tid]
+        s.team_id, s.agent_id = tid, t.get("lead") or None
+    elif aid and aid in agents.store.agents:
+        s.agent_id = aid
+    if s.agent_id:  # the role's default mode and skills
+        a = agents.store.agents[s.agent_id]
+        if a.get("mode"):
+            s.model_selection = {"mode": a["mode"]}
+        s.picked_skills |= {n for n in a.get("skills", []) if n in skills.store.items}
+    if s.agent_id or s.team_id:
         s.persist()
     pid = (body or {}).get("projectId")
     if pid and projects.store and pid in projects.store.items:
@@ -293,6 +307,54 @@ async def skill_from_session(body: dict):
         return await skills.store.from_sandbox(await manager.get(s.sandbox_id), path)
     except skills.SkillError as e:
         raise HTTPException(400, str(e))
+
+
+# ------------------------------------------------------------- agents & teams ---
+
+def _agent_call(fn, *a):
+    try:
+        return fn(*a)
+    except KeyError:
+        raise HTTPException(404, "not found")
+    except agents.AgentError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/agents")
+async def list_agents():
+    return agents.store.view()
+
+
+@app.post("/api/agents")
+async def create_agent(body: dict):
+    return _agent_call(agents.store.create_agent, body)
+
+
+@app.patch("/api/agents/{aid}")
+async def update_agent(aid: str, body: dict):
+    return _agent_call(agents.store.update_agent, aid, body)
+
+
+@app.delete("/api/agents/{aid}")
+async def delete_agent(aid: str):
+    agents.store.delete_agent(aid)
+    return {"ok": True}
+
+
+@app.post("/api/teams")
+async def create_team(body: dict):
+    return _agent_call(agents.store.create_team, body)
+
+
+@app.patch("/api/teams/{tid}")
+async def update_team(tid: str, body: dict):
+    return _agent_call(agents.store.update_team, tid, body)
+
+
+@app.delete("/api/teams/{tid}")
+async def delete_team(tid: str):
+    agents.store.delete_team(tid)
+    return {"ok": True}
 
 
 # ------------------------------------------------------------- skill recorder (技能录制器) ---

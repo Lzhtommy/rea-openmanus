@@ -703,3 +703,11 @@ textarea.code-edit { font: 13px/20px var(--font-mono); min-height: 52vh; }
 .rec-side textarea { font: 13px/20px var(--font); padding: 8px 10px; border: 1px solid var(--border-dark); border-radius: 8px; background: var(--bg-white); color: var(--text-primary); resize: vertical; }
 .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; margin-right: 6px; animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
+
+/* ---- agents & teams */
+#agents { flex: 1; min-height: 0; overflow-y: auto; }
+#ag-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+#ag-modal .sched-card { width: min(620px, 100%); max-height: 92vh; overflow: auto; }
+.ag-av { width: 36px; height: 36px; border-radius: 50%; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; font-size: 16px; flex: none; border: 2px solid var(--bg-white); }
+.ag-stack { display: inline-flex; } .ag-stack .ag-av { margin-left: -10px; } .ag-stack .ag-av:first-child { margin-left: 0; }
+.dg-head { display: flex; align-items: center; gap: 10px; margin: 8px 0; }

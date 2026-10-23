@@ -22,6 +22,7 @@
       <div class="nav-body">
         <button class="nav-item" id="new-task"><span class="nav-ico" data-icon="newTask"></span><span class="nav-label">新建任务</span><kbd>⌘K</kbd></button>
         <button class="nav-item" id="nav-pc"><span class="nav-ico" data-icon="monitor"></span><span class="nav-label">电脑</span></button>
+        <button class="nav-item" id="nav-agents"><span class="nav-ico" data-icon="users"></span><span class="nav-label">Agent</span></button>
         <button class="nav-item" id="nav-library"><span class="nav-ico" data-icon="library"></span><span class="nav-label">资料库</span></button>
         <button class="nav-item" id="nav-create"><span class="nav-ico" data-icon="sparkBox"></span><span class="nav-label">创作</span></button>
         <button class="nav-item" id="nav-auto"><span class="nav-ico" data-icon="clock"></span><span class="nav-label">自动化</span></button>
@@ -98,6 +99,15 @@
           </form>
           <div class="lib-tabs" id="auto-tabs"></div>
           <div id="auto-list"></div>
+        </div>
+      </div>
+
+      <div id="agents" class="hidden">
+        <div class="lib-inner wide">
+          <div class="lib-head"><h2>Agent</h2><div class="head-btns"><button class="btn ghost" id="ag-new-team">组建团队</button><button class="btn primary" id="ag-new">创建 Agent</button></div></div>
+          <p class="auto-intro">创建有专门职责的 Agent，并把它们组成协同工作的团队：团队负责人会拆分任务、分派给成员并汇总结果。</p>
+          <div class="lib-tabs" id="ag-tabs"></div>
+          <div id="ag-list" class="sk-grid"></div>
         </div>
       </div>
 
@@ -312,6 +322,14 @@
         <div class="sched-err" id="pcnew-err"></div>
       </div>
       <div class="cc-actions"><button type="button" class="btn ghost" id="pcnew-cancel">取消</button><button type="submit" class="btn primary">创建</button></div>
+    </form>
+  </div>
+
+  <div id="ag-modal" class="hidden">
+    <form class="sched-card" id="ag-form" autocomplete="off">
+      <div class="viewer-head"><div class="viewer-title"><div id="ag-form-title" style="font-size:16px;font-weight:500"></div></div><button type="button" class="icon-btn" id="ag-close" data-icon="x"></button></div>
+      <div class="sched-body" id="ag-form-body"></div>
+      <div class="cc-actions"><span class="sched-err" id="ag-err"></span><span class="spacer"></span><button type="button" class="btn ghost" id="ag-cancel">取消</button><button type="submit" class="btn primary">保存</button></div>
     </form>
   </div>
 

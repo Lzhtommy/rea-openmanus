@@ -949,3 +949,44 @@ async def test_skill_recorder(store, monkeypatch, tmp_path):
     assert out["draft"]["name"] == "search-flow" and "每次搜索" in seen["notes"]
     assert "无人机" in seen["steps"] and "s3cret" not in seen["steps"] and "<secret" in seen["steps"]
     assert f"rec-{r['id']}" not in manager.sandboxes  # the recording browser is gone
+
+
+@pytest.mark.asyncio
+async def test_agent_team(store, monkeypatch, tmp_path):
+    """A team task: the lead sees the roster and delegates to members, who run in their own roles in parallel."""
+    import time as _t
+    from app import agents, main
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    agents.store = agents.Agents()
+    lead = agents.store.create_agent({"name": "主编", "instructions": "统筹并汇总", "mode": "lite"})
+    r = agents.store.create_agent({"name": "研究员", "description": "查资料", "instructions": "只用一手来源"})
+    w = agents.store.create_agent({"name": "写手", "description": "写稿", "instructions": "语言简洁"})
+    with pytest.raises(agents.AgentError):
+        agents.store.create_team({"name": "x", "members": [r["id"]]})
+    team = agents.store.create_team({"name": "内容小组", "members": [lead["id"], r["id"], w["id"]], "lead": lead["id"]})
+    starts = {}
+
+    async def model(messages, effort, on_delta=None, text_id="text", profile=None):
+        first = messages[0]["content"]
+        if isinstance(first, str) and "member of an agent team" in first:
+            who = first.split('You are "')[1].split('"')[0]
+            if len(messages) == 1:
+                starts[who] = _t.monotonic()
+                return msg(tool("shell_exec", command="sleep 1"))
+            assert ("只用一手来源" in first) if who == "研究员" else ("语言简洁" in first)
+            return msg(tool("idle", result=f"{who} done"))
+        if not any(m["role"] == "assistant" for m in messages):
+            return msg(tool("agent_delegate", agent="研究员", task="查资料"), tool("agent_delegate", agent="写手", task="写初稿"),
+                       tool("agent_delegate", agent="路人", task="x"))
+        return msg(tool("idle"))
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.get((await main.create_session({"teamId": team["id"]}))["id"])
+    assert s.agent_id == lead["id"] and s.model_selection == {"mode": "lite"}
+    await s.user_message("写一篇行业短评", [])
+    await wait_status(s, {"idle"})
+    note = next(m["content"] for m in s.messages if m["role"] == "system")
+    assert "<agent_team" in note and "研究员: 查资料" in note
+    done = [e for e in s.events if e.get("name") == "agent_delegate" and e["status"] in ("success", "error")]
+    assert sorted(e["status"] for e in done) == ["error", "success", "success"]
+    assert abs(starts["研究员"] - starts["写手"]) < 0.8  # delegations in one turn run in parallel
+    assert {e["detail"]["delegate"]["result"] for e in done if e["status"] == "success"} == {"研究员 done", "写手 done"}
