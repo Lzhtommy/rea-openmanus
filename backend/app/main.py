@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import agents, computers, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import agents, auth, computers, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -36,6 +36,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
+    auth.store = auth.Users()
     session_mod.store = session_mod.SessionStore()
     projects.store = projects.Projects()
     personal.store = personal.Personal()
@@ -76,34 +77,223 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Manus-like agent platform", lifespan=lifespan)
 
+# Paths that work without signing in: sign-in itself, public share replays, incoming webhooks (secret URL),
+# the device connector (device token) and its downloads.
+OPEN_PATHS = ("/api/auth/", "/api/share/", "/api/hooks/", "/api/devices/connect", "/api/devices/agent.py", "/api/devices/server.py",
+              "/api/config")
+
+
+@app.middleware("http")
+async def auth_gate(request: Request, call_next):
+    """Multi-user mode: every API call runs as the signed-in user (auth.current), or gets 401."""
+    if not request.url.path.startswith("/api/") or not auth.store or not auth.store.enabled:
+        return await call_next(request)
+    user = auth.store.from_token(request.cookies.get(auth.COOKIE))
+    if not user and not request.url.path.startswith(OPEN_PATHS):
+        return Response(json.dumps({"detail": "请先登录"}), status_code=401, media_type="application/json")
+    token = auth.current.set(user)
+    try:
+        return await call_next(request)
+    finally:
+        auth.current.reset(token)
+
+
+def _ws_user(websocket: WebSocket) -> tuple[bool, dict | None]:
+    """(allowed, user) for a WebSocket: signed in, or single-user mode."""
+    if not auth.store or not auth.store.enabled:
+        return True, None
+    user = auth.store.from_token(websocket.cookies.get(auth.COOKIE))
+    return bool(user), user
+
+
+# ------------------------------------------------------------- accounts (账户) ---
+
+def _sign_in(resp: Response, user: dict) -> Response:
+    resp.set_cookie(auth.COOKIE, auth.store.token(user["id"]), max_age=auth.TTL, httponly=True, samesite="lax",
+                    secure=config.PUBLIC_BASE_URL.startswith("https"))
+    return resp
+
+
+def _json(data) -> Response:
+    return Response(json.dumps(data, ensure_ascii=False), media_type="application/json")
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    user = auth.store.from_token(request.cookies.get(auth.COOKIE)) if auth.store.enabled else None
+    return {"enabled": auth.store.enabled, "setup": not auth.store.items, "feishu": auth.store.feishu_enabled(),
+            "user": auth.Users.public(user) if user else None}
+
+
+@app.post("/api/auth/setup")
+async def auth_setup(body: dict):
+    """Create the first (admin) account; everything created so far becomes theirs."""
+    if auth.store.items:
+        raise HTTPException(409, "已经设置过管理员")
+    try:
+        u = auth.store.create(str(body.get("username") or ""), str(body.get("password") or ""), str(body.get("name") or ""), "admin")
+    except auth.AuthError as e:
+        raise HTTPException(400, str(e))
+    _adopt_existing(u["id"])
+    return _sign_in(_json({"user": auth.Users.public(u)}), u)
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: dict):
+    u = auth.store.verify(str(body.get("username") or ""), str(body.get("password") or ""))
+    if not u:
+        await asyncio.sleep(0.5)
+        raise HTTPException(401, "用户名或密码不正确")
+    return _sign_in(_json({"user": auth.Users.public(u)}), u)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout():
+    resp = _json({"ok": True})
+    resp.delete_cookie(auth.COOKIE)
+    return resp
+
+
+@app.post("/api/auth/password")
+async def auth_password(body: dict, request: Request):
+    u = auth.store.from_token(request.cookies.get(auth.COOKIE))
+    if not u or (u.get("password") and not auth.store.verify(u["username"], str(body.get("old") or ""))):
+        raise HTTPException(400, "原密码不正确")
+    try:
+        auth.store.set_password(u["id"], str(body.get("new") or ""))
+    except auth.AuthError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+def _feishu_redirect() -> str:
+    return f"{config.PUBLIC_BASE_URL}/api/auth/feishu/callback"
+
+
+@app.get("/api/auth/feishu/login")
+async def feishu_login():
+    from fastapi.responses import RedirectResponse
+    if not auth.store.feishu_enabled():
+        raise HTTPException(404, "飞书登录未配置")
+    state = secrets.token_urlsafe(16)
+    resp = RedirectResponse(auth.Users.feishu_authorize_url(state, _feishu_redirect()))
+    resp.set_cookie("om_oauth_state", state, max_age=600, httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/api/auth/feishu/callback")
+async def feishu_callback(request: Request, code: str = "", state: str = ""):
+    from fastapi.responses import RedirectResponse
+    if not state or not secrets.compare_digest(state, request.cookies.get("om_oauth_state") or ""):
+        raise HTTPException(400, "登录状态已失效，请重试")
+    try:
+        u = await auth.store.feishu_login(code, _feishu_redirect())
+    except (auth.AuthError, httpx.HTTPError) as e:
+        return Response(f"<p>{e}</p><p><a href='/'>返回</a></p>", media_type="text/html", status_code=400)
+    if len(auth.store.items) == 1:
+        _adopt_existing(u["id"])
+    return _sign_in(RedirectResponse("/"), u)
+
+
+def _admin() -> dict:
+    u = auth.current.get()
+    if not u or u.get("role") != "admin":
+        raise HTTPException(403, "需要管理员权限")
+    return u
+
+
+@app.get("/api/users")
+async def list_users():
+    _admin()
+    return [auth.Users.public(u) for u in sorted(auth.store.items.values(), key=lambda u: u["createdAt"])]
+
+
+@app.post("/api/users")
+async def create_user(body: dict):
+    _admin()
+    try:
+        u = auth.store.create(str(body.get("username") or ""), str(body.get("password") or ""), str(body.get("name") or ""),
+                              "admin" if body.get("role") == "admin" else "member")
+    except auth.AuthError as e:
+        raise HTTPException(400, str(e))
+    return auth.Users.public(u)
+
+
+@app.patch("/api/users/{uid}")
+async def update_user(uid: str, body: dict):
+    me = _admin()
+    if uid not in auth.store.items:
+        raise HTTPException(404, "user not found")
+    u = auth.store.items[uid]
+    if body.get("role") in ("admin", "member") and uid != me["id"]:
+        u["role"] = body["role"]
+    if body.get("name"):
+        u["name"] = str(body["name"]).strip()[:40]
+    try:
+        if body.get("password"):
+            auth.store.set_password(uid, str(body["password"]))
+    except auth.AuthError as e:
+        raise HTTPException(400, str(e))
+    auth.store.save()
+    return auth.Users.public(u)
+
+
+@app.delete("/api/users/{uid}")
+async def delete_user(uid: str):
+    me = _admin()
+    if uid == me["id"]:
+        raise HTTPException(400, "不能删除自己")
+    auth.store.delete(uid)
+    return {"ok": True}
+
+
+def _adopt_existing(uid: str) -> None:
+    """Switching to multi-user: the first admin owns everything made in single-user mode."""
+    for s in session_mod.store.sessions.values():
+        if not s.owner:
+            s.owner = uid
+            s.persist()
+    for store, attr in ((projects.store, "items"), (scheduler_mod.scheduler, "items"), (triggers_mod.triggers, "items"),
+                        (sites.store, "items"), (computers.store, "items"), (devices.store, "items"),
+                        (agents.store, "agents"), (agents.store, "teams")):
+        for item in getattr(store, attr).values():
+            item.setdefault("owner", None)
+            item["owner"] = item["owner"] or uid
+        store.save()
+    legacy = config.DATA_DIR / "personal.json"
+    if legacy.exists() and not (config.DATA_DIR / f"personal-{uid}.json").exists():
+        import shutil
+        shutil.copy(legacy, config.DATA_DIR / f"personal-{uid}.json")
+
 
 def _session(sid: str):
     s = session_mod.store.get(sid)
-    if not s:
+    if not s or not auth.visible({"owner": s.owner}):
         raise HTTPException(404, "session not found")
     return s
 
 
 @app.get("/api/sessions")
 async def list_sessions():
-    return session_mod.store.list()
+    return [m for m in session_mod.store.list() if auth.visible(m)]
 
 
 @app.post("/api/sessions")
 async def create_session(body: dict | None = None):
     s = session_mod.store.create()
+    s.owner = auth.owner()
     cid, did = (body or {}).get("computerId"), (body or {}).get("deviceId")
-    if cid and computers.store and cid in computers.store.items:
+    if cid and computers.store and cid in computers.store.items and auth.visible(computers.store.items[cid]):
         s.computer_id = cid
         s.persist()
-    elif did and devices.store and did in devices.store.items:
+    elif did and devices.store and did in devices.store.items and auth.visible(devices.store.items[did]):
         s.device_id = did
         s.persist()
     aid, tid = (body or {}).get("agentId"), (body or {}).get("teamId")
-    if tid and tid in agents.store.teams:
+    if tid and tid in agents.store.teams and auth.visible(agents.store.teams[tid]):
         t = agents.store.teams[tid]
         s.team_id, s.agent_id = tid, t.get("lead") or None
-    elif aid and aid in agents.store.agents:
+    elif aid and aid in agents.store.agents and auth.visible(agents.store.agents[aid]):
         s.agent_id = aid
     if s.agent_id:  # the role's default mode and skills
         a = agents.store.agents[s.agent_id]
@@ -113,7 +303,7 @@ async def create_session(body: dict | None = None):
     if s.agent_id or s.team_id:
         s.persist()
     pid = (body or {}).get("projectId")
-    if pid and projects.store and pid in projects.store.items:
+    if pid and projects.store and pid in projects.store.items and auth.visible(projects.store.items[pid]):
         s.project_id = pid
         s.persist()
     return s.meta()
@@ -179,20 +369,23 @@ async def download(sid: str, path: str):
 # ------------------------------------------------------------- projects (项目) ---
 
 def _project(pid: str) -> dict:
-    if pid not in projects.store.items:
+    if pid not in projects.store.items or not auth.visible(projects.store.items[pid]):
         raise HTTPException(404, "project not found")
     return projects.store.items[pid]
 
 
 @app.get("/api/projects")
 async def list_projects():
-    return projects.store.list()
+    return [p for p in projects.store.list() if auth.visible(p)]
 
 
 @app.post("/api/projects")
 async def create_project(body: dict):
     try:
-        return projects.store.create(body.get("name", ""), body.get("instructions", ""))
+        p = projects.store.create(body.get("name", ""), body.get("instructions", ""))
+        projects.store.items[p["id"]]["owner"] = auth.owner()
+        projects.store.save()
+        return {**p, "owner": auth.owner()}
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -311,6 +504,19 @@ async def skill_from_session(body: dict):
 
 # ------------------------------------------------------------- agents & teams ---
 
+def _visible(item):
+    if not auth.visible(item):
+        raise HTTPException(404, "not found")
+    return item
+
+
+def _own(item: dict, store) -> dict:
+    """Record the current user on a just-created item and save."""
+    item["owner"] = auth.owner()
+    store.save()
+    return item
+
+
 def _agent_call(fn, *a):
     try:
         return fn(*a)
@@ -322,37 +528,42 @@ def _agent_call(fn, *a):
 
 @app.get("/api/agents")
 async def list_agents():
-    return agents.store.view()
+    v = agents.store.view()
+    return {"agents": [a for a in v["agents"] if auth.visible(a)], "teams": [t for t in v["teams"] if auth.visible(t)]}
 
 
 @app.post("/api/agents")
 async def create_agent(body: dict):
-    return _agent_call(agents.store.create_agent, body)
+    return _own(_agent_call(agents.store.create_agent, body), agents.store)
 
 
 @app.patch("/api/agents/{aid}")
 async def update_agent(aid: str, body: dict):
+    _visible(agents.store.agents.get(aid))
     return _agent_call(agents.store.update_agent, aid, body)
 
 
 @app.delete("/api/agents/{aid}")
 async def delete_agent(aid: str):
+    _visible(agents.store.agents.get(aid))
     agents.store.delete_agent(aid)
     return {"ok": True}
 
 
 @app.post("/api/teams")
 async def create_team(body: dict):
-    return _agent_call(agents.store.create_team, body)
+    return _own(_agent_call(agents.store.create_team, body), agents.store)
 
 
 @app.patch("/api/teams/{tid}")
 async def update_team(tid: str, body: dict):
+    _visible(agents.store.teams.get(tid))
     return _agent_call(agents.store.update_team, tid, body)
 
 
 @app.delete("/api/teams/{tid}")
 async def delete_team(tid: str):
+    _visible(agents.store.teams.get(tid))
     agents.store.delete_team(tid)
     return {"ok": True}
 
@@ -413,12 +624,12 @@ async def recording_vnc(websocket: WebSocket, rid: str):
 
 @app.get("/api/personalization")
 async def get_personal():
-    return personal.store.view()
+    return personal.of(auth.owner()).view()
 
 
 @app.put("/api/personalization")
 async def put_personal(body: dict):
-    return personal.store.update(body)
+    return personal.of(auth.owner()).update(body)
 
 
 @app.post("/api/personalization/import")
@@ -436,21 +647,21 @@ async def import_memory(body: dict):
 @app.post("/api/knowledge")
 async def add_knowledge(body: dict):
     try:
-        return personal.store.add(body.get("title", ""), body.get("content", ""), source=body.get("source") or "user")
+        return personal.of(auth.owner()).add(body.get("title", ""), body.get("content", ""), source=body.get("source") or "user")
     except ValueError as e:
         raise HTTPException(400, str(e))
 
 
 @app.patch("/api/knowledge/{kid}")
 async def edit_knowledge(kid: str, body: dict):
-    if kid not in personal.store.knowledge:
+    if kid not in personal.of(auth.owner()).knowledge:
         raise HTTPException(404, "knowledge not found")
-    return personal.store.edit(kid, body)
+    return personal.of(auth.owner()).edit(kid, body)
 
 
 @app.delete("/api/knowledge/{kid}")
 async def delete_knowledge(kid: str):
-    personal.store.remove(kid)
+    personal.of(auth.owner()).remove(kid)
     return {"ok": True}
 
 
@@ -661,20 +872,20 @@ async def install_plugin(pid: str, body: dict):
 
 def _sched(sid: str) -> dict:
     s = scheduler_mod.scheduler.items.get(sid)
-    if not s:
+    if not s or not auth.visible(s):
         raise HTTPException(404, "schedule not found")
     return s
 
 
 @app.get("/api/schedules")
 async def list_schedules():
-    return scheduler_mod.scheduler.list()
+    return [x for x in scheduler_mod.scheduler.list() if auth.visible(x)]
 
 
 @app.post("/api/schedules")
 async def create_schedule(body: dict):
     try:
-        return scheduler_mod.scheduler.create(body.get("title", ""), body.get("prompt", ""), body.get("schedule") or {})
+        return scheduler_mod.scheduler.create(body.get("title", ""), body.get("prompt", ""), body.get("schedule") or {}, owner=auth.owner())
     except scheduler_mod.ScheduleError as e:
         raise HTTPException(400, str(e))
 
@@ -705,20 +916,20 @@ async def run_schedule(sid: str):
 
 def _trigger(tid: str) -> dict:
     t = triggers_mod.triggers.items.get(tid)
-    if not t:
+    if not t or not auth.visible(t):
         raise HTTPException(404, "trigger not found")
     return t
 
 
 @app.get("/api/triggers")
 async def list_triggers():
-    return triggers_mod.triggers.list()
+    return [t for t in triggers_mod.triggers.list() if auth.visible(t)]
 
 
 @app.post("/api/triggers")
 async def create_trigger(body: dict):
     try:
-        return triggers_mod.triggers.create(body)
+        return triggers_mod.triggers.create(body, owner=auth.owner())
     except (triggers_mod.TriggerError, ValueError) as e:
         raise HTTPException(400, str(e))
 
@@ -803,13 +1014,15 @@ async def automation_activity():
     items = []
     for s in session_mod.store.sessions.values():
         src = s.schedule_id or s.trigger_id
-        if not src:
+        if not src or not auth.visible({"owner": s.owner}):
             continue
         kind, title = names.get(src, ("schedule" if s.schedule_id else "trigger", "（已删除的自动化）"))
         files = [{"filename": f["filename"], "url": s.file_url(f["path"])} for f in s.files.values() if "deliverable" in f["kinds"]]
         items.append({"type": "run", "at": s.created_at, "sessionId": s.session_id, "title": s.title, "status": s.status,
                       "source": {"id": src, "kind": kind, "title": title}, "files": files[:4]})
     for t in triggers_mod.triggers.items.values():
+        if not auth.visible(t):
+            continue
         for c in t.get("checks", []):
             if not c.get("sessionId"):
                 items.append({"type": "check", "at": c["at"], "met": c["met"], "summary": c["summary"],
@@ -821,14 +1034,14 @@ async def automation_activity():
 
 def _computer(cid: str) -> dict:
     c = computers.store.items.get(cid)
-    if not c:
+    if not c or not auth.visible(c):
         raise HTTPException(404, "computer not found")
     return c
 
 
 @app.get("/api/computers")
 async def list_computers():
-    return {"computers": computers.store.list(), **computers.store.catalog(),
+    return {"computers": [c for c in computers.store.list() if auth.visible(c)], **computers.store.catalog(),
             "tasks": {cid: [s.session_id for s in session_mod.store.sessions.values() if s.computer_id == cid]
                       for cid in computers.store.items}}
 
@@ -836,7 +1049,10 @@ async def list_computers():
 @app.post("/api/computers")
 async def create_computer(body: dict):
     try:
-        return computers.store.create(body)
+        c = computers.store.create(body)
+        computers.store.items[c["id"]]["owner"] = auth.owner()
+        computers.store.save()
+        return {**c, "owner": auth.owner()}
     except computers.ComputerError as e:
         raise HTTPException(400, str(e))
 
@@ -889,7 +1105,9 @@ async def computer_exec(cid: str, body: dict):
 @app.websocket("/api/computers/{cid}/vnc")
 async def computer_vnc(websocket: WebSocket, cid: str):
     """The computer's desktop, like a task's live screen."""
-    sb = manager.sandboxes.get(computers.sandbox_id(cid)) if cid in computers.store.items else None
+    allowed, user = _ws_user(websocket)
+    c = computers.store.items.get(cid)
+    sb = manager.sandboxes.get(computers.sandbox_id(cid)) if c and allowed and (not user or c.get("owner") == user["id"]) else None
     await _relay_vnc(websocket, sb)
 
 
@@ -905,14 +1123,14 @@ async def _proxy_port(sb, port: int, request: Request) -> Response:
 
 def _device(did: str) -> dict:
     d = devices.store.items.get(did)
-    if not d:
+    if not d or not auth.visible(d):
         raise HTTPException(404, "device not found")
     return d
 
 
 @app.get("/api/devices")
 async def list_devices():
-    return {"devices": devices.store.list(),
+    return {"devices": [d for d in devices.store.list() if auth.visible(d)],
             "tasks": {did: [s.session_id for s in session_mod.store.sessions.values() if s.device_id == did] for did in devices.store.items}}
 
 
@@ -920,6 +1138,8 @@ async def list_devices():
 async def create_device(body: dict | None = None):
     """Pair a new computer: the token is returned once, with the command to run on that machine."""
     d, token = devices.store.create(str((body or {}).get("name") or ""))
+    devices.store.items[d["id"]]["owner"] = d["owner"] = auth.owner()
+    devices.store.save()
     return {"device": d, "token": token, "server": config.PUBLIC_BASE_URL}
 
 
@@ -987,14 +1207,14 @@ async def device_connect(websocket: WebSocket, token: str = ""):
 
 def _site(sid: str) -> dict:
     s = sites.store.items.get(sid)
-    if not s:
+    if not s or not auth.visible(s):
         raise HTTPException(404, "site not found")
     return s
 
 
 @app.get("/api/sites")
 async def list_sites():
-    return sites.store.list()
+    return [x for x in sites.store.list() if auth.visible(x)]
 
 
 @app.patch("/api/sites/{sid}")
@@ -1062,6 +1282,8 @@ async def usage():
     keys = ("activeMs", "llmCalls", "input", "output", "cached", "toolCalls")
     total, days, models, tasks = dict.fromkeys(keys, 0), {}, {}, []
     for s in session_mod.store.sessions.values():
+        if not auth.visible({"owner": s.owner}):
+            continue
         u = s.usage
         day = datetime.fromtimestamp(s.created_at).strftime("%Y-%m-%d")
         d = days.setdefault(day, dict.fromkeys(keys, 0) | {"tasks": 0})
@@ -1075,7 +1297,7 @@ async def usage():
                 mm[k] += m.get(k, 0)
         if u.get("llmCalls"):
             tasks.append({"id": s.session_id, "title": s.title, "createdAt": s.created_at, **{k: u.get(k, 0) for k in keys}})
-    return {"total": {**total, "tasks": len(session_mod.store.sessions)},
+    return {"total": {**total, "tasks": sum(d["tasks"] for d in days.values())},
             "days": [{"day": k, **v} for k, v in sorted(days.items(), reverse=True)][:30],
             "models": [{"model": k, **v} for k, v in sorted(models.items(), key=lambda x: -x[1]["calls"])],
             "tasks": sorted(tasks, key=lambda t: -(t["input"] + t["output"]))[:20]}
@@ -1086,6 +1308,8 @@ async def library():
     """Every kept file across tasks, newest first (Manus' 资料库)."""
     items = []
     for s in session_mod.store.sessions.values():
+        if not auth.visible({"owner": s.owner}):
+            continue
         for f in s.files.values():
             items.append({**{k: f[k] for k in ("path", "filename", "size", "kinds", "mime", "createdAt", "updatedAt")},
                           "sessionId": s.session_id, "sessionTitle": s.title, "url": s.file_url(f["path"])})
@@ -1114,7 +1338,12 @@ async def preview(sid: str, port: int, path: str, request: Request):
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
+    allowed, user = _ws_user(websocket)
     await websocket.accept()
+    if not allowed:
+        await websocket.close(code=4401)
+        return
+    auth.current.set(user)
     queue: asyncio.Queue = asyncio.Queue()
     joined: dict[str, session_mod.Session] = {}
 
@@ -1128,7 +1357,7 @@ async def ws(websocket: WebSocket):
             msg = await websocket.receive_json()
             kind, sid = msg.get("type"), msg.get("sessionId")
             s = session_mod.store.get(sid) if sid else None
-            if not s:
+            if not s or not auth.visible({"owner": s.owner}):
                 await websocket.send_json({"type": "error", "message": f"unknown session {sid}"})
                 continue
             if kind == "join_session":
@@ -1166,7 +1395,10 @@ async def ws(websocket: WebSocket):
 @app.websocket("/api/sessions/{sid}/vnc")
 async def vnc(websocket: WebSocket, sid: str):
     """Relay the sandbox's live screen (VNC over WebSocket) to the web client, like Manus' vncUrl."""
+    allowed, user = _ws_user(websocket)
     s = session_mod.store.get(sid)
+    if not allowed or (s and user and s.owner != user["id"]):
+        s = None
     await _relay_vnc(websocket, manager.sandboxes.get(s.sandbox_id) if s else None)
 
 

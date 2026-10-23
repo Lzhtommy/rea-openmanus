@@ -1043,3 +1043,35 @@ async def test_usage_and_promotions(store, monkeypatch):
     assert {p["suggestion"] for p in promos} == {"做成网页", "做成幻灯片"} and "report.md" in promos[0]["promptForAI"]
     u = await main.usage()
     assert u["total"]["input"] >= 1200 and any(t["id"] == s.session_id for t in u["tasks"])
+
+
+def test_multi_user(monkeypatch, tmp_path):
+    """First account adopts existing data; users only see their own tasks; the API needs a session cookie."""
+    from fastapi.testclient import TestClient
+    from app import main
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "SESSIONS_DIR", tmp_path / "sessions")
+    with TestClient(main.app) as c:
+        old = c.post("/api/sessions", json={}).json()["id"]  # single-user mode: no sign-in needed
+        assert c.get("/api/auth/me").json() == {"enabled": False, "setup": True, "feishu": False, "user": None}
+        assert c.post("/api/auth/setup", json={"username": "admin", "password": "short"}).status_code == 400
+        r = c.post("/api/auth/setup", json={"username": "admin", "password": "correct-horse", "name": "管理员"})
+        assert r.status_code == 200 and r.json()["user"]["role"] == "admin"
+        assert [s["id"] for s in c.get("/api/sessions").json()] == [old]  # adopted
+        assert c.post("/api/users", json={"username": "bob", "password": "bob-password"}).status_code == 200
+        c.post("/api/auth/logout")
+        assert c.get("/api/sessions").status_code == 401
+        assert c.post("/api/auth/login", json={"username": "bob", "password": "nope"}).status_code == 401
+        assert c.post("/api/auth/login", json={"username": "bob", "password": "bob-password"}).status_code == 200
+        assert c.get("/api/sessions").json() == [] and c.get(f"/api/sessions/{old}").status_code == 404
+        mine = c.post("/api/sessions", json={}).json()["id"]
+        assert [s["id"] for s in c.get("/api/sessions").json()] == [mine]
+        assert c.get("/api/users").status_code == 403  # members cannot manage users
+        c.put("/api/personalization", json={"instructions": "bob 的要求"})
+        c.post("/api/auth/logout")
+        c.post("/api/auth/login", json={"username": "admin", "password": "correct-horse"})
+        assert c.get("/api/personalization").json()["instructions"] != "bob 的要求"
+        assert {s["id"] for s in c.get("/api/sessions").json()} == {old}
+        with c.websocket_connect("/ws") as ws:  # the socket also refuses other users' tasks
+            ws.send_json({"type": "join_session", "sessionId": mine, "lastSeq": -1})
+            assert ws.receive_json()["type"] == "error"

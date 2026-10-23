@@ -56,6 +56,7 @@ class Session(AgentHost):
         self.trigger_id: str | None = None  # set when a trigger (webhook / condition) started this session
         self.computer_id: str | None = None  # runs on this cloud computer instead of its own sandbox
         self.device_id: str | None = None  # runs on the user's own computer (device connector)
+        self.owner: str | None = None  # user id (multi-user mode)
         self.agent_id: str | None = None  # custom agent whose role this task works in
         self.team_id: str | None = None  # agent team this task is led for
         self.role_announced = False
@@ -93,7 +94,7 @@ class Session(AgentHost):
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
                 "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id, "triggerId": self.trigger_id, "computerId": self.computer_id, "deviceId": self.device_id, "agentId": self.agent_id, "teamId": self.team_id,
-                "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id, "usage": self.usage}
+                "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id, "usage": self.usage, "owner": self.owner}
 
     def persist(self) -> None:
         _atomic_write(self.dir / "meta.json", json.dumps({**self.meta(), "envAnnounced": self.env_announced,
@@ -116,6 +117,7 @@ class Session(AgentHost):
         s.computer_id = meta.get("computerId")
         s.device_id = meta.get("deviceId")
         s.agent_id, s.team_id = meta.get("agentId"), meta.get("teamId")
+        s.owner = meta.get("owner")
         s.role_announced = meta.get("roleAnnounced", False)
         s.usage = {**s.usage, **(meta.get("usage") or {})}
         s.model_selection = meta.get("model") or {}
@@ -242,18 +244,18 @@ class Session(AgentHost):
         from .scheduler import scheduler
         spec = {"kind": a.get("kind"), "at": a.get("at"), "everyMinutes": a.get("every_minutes"),
                 "time": a.get("time"), "weekday": a.get("weekday")}
-        return scheduler.create(a.get("title", ""), a.get("prompt", ""), spec, source=self.session_id)
+        return scheduler.create(a.get("title", ""), a.get("prompt", ""), spec, source=self.session_id, owner=self.owner)
 
     def create_trigger(self, a: dict) -> dict:
         from .triggers import triggers
         return triggers.create({"kind": a.get("kind"), "title": a.get("title"), "prompt": a.get("prompt"),
                                 "condition": a.get("condition"), "everyMinutes": a.get("every_minutes") or 60},
-                               source=self.session_id)
+                               source=self.session_id, owner=self.owner)
 
     async def publish_site(self, sandbox, a: dict) -> dict:
         from . import sites
         return await sites.store.publish(sandbox, self.session_id, a["path"], a.get("title", ""), a.get("kind") or "website",
-                                         a.get("description") or "")
+                                         a.get("description") or "", owner=self.owner)
 
     def add_usage(self, model: str, usage: dict, tool_calls: int) -> None:
         u = self.usage
@@ -274,7 +276,7 @@ class Session(AgentHost):
         return agents_mod.store.member(None, name) if self.agent_id else None
 
     def propose_knowledge(self, title: str, content: str) -> dict:
-        return personal.store.add(title, content, source="agent", session_id=self.session_id, pending=True)
+        return personal.of(self.owner).add(title, content, source="agent", session_id=self.session_id, pending=True)
 
     def _computer(self) -> dict | None:
         from . import computers
@@ -437,7 +439,7 @@ class Session(AgentHost):
                 if note:
                     system_notes.append(note)
                 self.role_announced = True
-            if personal.store and (note := personal.store.note()) != self.personal_note:
+            if personal.store and (note := personal.of(self.owner).note()) != self.personal_note:
                 system_notes.append(note or "<user_profile>\nThe user cleared their profile, instructions and knowledge; "
                                     "disregard what was said about them earlier.\n</user_profile>")
                 self.personal_note = note

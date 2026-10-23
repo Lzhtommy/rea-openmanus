@@ -20,8 +20,8 @@ KNOWLEDGE_MAX = 200
 
 
 class Personal:
-    def __init__(self):
-        self.path = config.DATA_DIR / "personal.json"
+    def __init__(self, uid: str | None = None):
+        self.path = config.DATA_DIR / (f"personal-{uid}.json" if uid else "personal.json")
         self.profile: dict[str, str] = {k: "" for k in PROFILE_FIELDS}
         self.instructions = ""
         self.knowledge: dict[str, dict] = {}
@@ -105,4 +105,14 @@ class Personal:
         return "\n\n".join(parts)
 
 
-store: Personal | None = None
+store: Personal | None = None  # single-user mode
+_by_user: dict[str, Personal] = {}
+
+
+def of(uid: str | None) -> Personal:
+    """The profile, instructions and knowledge of one user (the shared one in single-user mode)."""
+    if not uid:
+        return store
+    if uid not in _by_user:
+        _by_user[uid] = Personal(uid)
+    return _by_user[uid]

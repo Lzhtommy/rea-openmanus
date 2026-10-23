@@ -82,7 +82,7 @@ class Sites:
         raise SiteError("could not allocate a site address")
 
     async def publish(self, sandbox, session_id: str, path: str, title: str, kind: str = "website",
-                      description: str = "") -> dict:
+                      description: str = "", owner: str | None = None) -> dict:
         if kind not in KINDS:
             kind = "website"
         src = path.rstrip("/") or "."
@@ -104,7 +104,7 @@ class Sites:
         site = next((s for s in self.items.values() if s["sessionId"] == session_id and s["sourcePath"] == src), None)
         if not site:
             site = {"id": secrets.token_hex(5), "slug": self._unique_slug(title), "sessionId": session_id, "sourcePath": src,
-                    "createdAt": time.time(), "versions": [], "current": 0}
+                    "createdAt": time.time(), "versions": [], "current": 0, "owner": owner}
         n = max((v["n"] for v in site["versions"]), default=0) + 1
         dest = self.root / site["id"] / f"v{n}"
         total = 0

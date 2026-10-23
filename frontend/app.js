@@ -1723,7 +1723,7 @@ async function applyImport() {
 }
 function closeImport() { $("#import-modal").classList.add("hidden"); S.importDraft = null; $("#import-result").innerHTML = ""; $("#import-text").value = ""; $("#import-run").textContent = "解析"; }
 function renderMe() {
-  const nick = S.personal.profile?.nickname;
+  const nick = S.personal.profile?.nickname || S.me?.name;
   $(".me-name").textContent = nick || "OpenManus";
   $(".me .avatar").textContent = (nick || "O").slice(0, 1).toUpperCase();
 }
@@ -1963,15 +1963,30 @@ function renderAttachments() {
 }
 
 // ------------------------------------------------------------------ settings (设置) ---
-const SET_TABS = [["general", "通用", "sun"], ["usage", "用量", "chart"], ["shortcuts", "快捷键", "list"], ["personal", "个性化", "user"], ["skills", "技能", "spark"], ["plugins", "插件与连接器", "puzzle"]];
+const SET_TABS = [["account", "账户", "user"], ["members", "成员", "users"], ["general", "通用", "sun"], ["usage", "用量", "chart"], ["shortcuts", "快捷键", "list"], ["personal", "个性化", "user"], ["skills", "技能", "spark"], ["plugins", "插件与连接器", "puzzle"]];
 const fmtNum = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n || 0));
-async function openSettings(tab = "general") {
+async function openSettings(tab = "account") {
+  if (tab === "members" && S.me?.role !== "admin") tab = "account";
   if (["personal", "skills", "plugins"].includes(tab)) { $("#settings-modal").classList.add("hidden"); return tab === "personal" ? openPersonal() : tab === "skills" ? openSkills("mine") : openPlugins(); }
   S.setTab = tab;
   $("#set-tabs").innerHTML = SET_TABS.map(([k, l, ic]) => `<button class="set-tab ${k === tab ? "on" : ""}" data-set="${k}">${icon(ic)}${l}</button>`).join("");
   $("#set-h").textContent = SET_TABS.find((x) => x[0] === tab)[1];
   $("#settings-modal").classList.remove("hidden");
   const body = $("#set-body");
+  if (tab === "account") {
+    body.innerHTML = S.me
+      ? `<div class="set-row"><div><b>${esc(S.me.name)}</b><div class="muted">@${esc(S.me.username)} · ${S.me.role === "admin" ? "管理员" : "成员"}${S.me.feishu ? " · 飞书账号" : ""}</div></div><button class="btn ghost sm" id="set-logout">退出登录</button></div>` +
+        `<form class="sched-body" id="set-pw" style="padding:14px 0"><div class="mcp-label">修改密码</div><div class="sched-row"><label>原密码<input name="old" type="password" autocomplete="current-password" /></label><label>新密码<input name="new" type="password" autocomplete="new-password" minlength="8" /></label></div><div class="cc-actions" style="padding:0"><span class="sched-err" id="set-pw-err"></span><span class="spacer"></span><button class="btn primary sm">保存</button></div></form>`
+      : `<div class="set-row"><div><b>单用户模式</b><div class="muted">当前没有账号，任何能打开这个页面的人都能看到所有任务。创建管理员账号后启用登录，现有数据归管理员所有，再由管理员添加成员。</div></div></div>` +
+        `<form class="sched-body" id="set-setup" style="padding:14px 0"><div class="mcp-label">创建管理员账号</div><div class="sched-row"><label>用户名<input name="username" autocomplete="username" required /></label><label>名字<input name="name" /></label></div><label>密码（至少 8 位）<input name="password" type="password" autocomplete="new-password" minlength="8" required /></label><div class="cc-actions" style="padding:0"><span class="sched-err" id="set-setup-err"></span><span class="spacer"></span><button class="btn primary sm">创建并启用登录</button></div></form>`;
+    return;
+  }
+  if (tab === "members") {
+    const users = await (await fetch("/api/users")).json();
+    body.innerHTML = users.map((u) => `<div class="set-row"><div><b>${esc(u.name)}</b><div class="muted">@${esc(u.username)} · ${u.role === "admin" ? "管理员" : "成员"}${u.feishu ? " · 飞书" : ""}</div></div>${u.id === S.me.id ? '<span class="muted">你</span>' : `<button class="icon-btn sm" data-user-del="${esc(u.id)}" title="删除">${icon("trash")}</button>`}</div>`).join("") +
+      `<form class="sched-body" id="set-adduser" style="padding:14px 0"><div class="mcp-label">添加成员</div><div class="sched-row"><label>用户名<input name="username" required /></label><label>名字<input name="name" /></label></div><div class="sched-row"><label>初始密码<input name="password" type="password" minlength="8" required /></label><label>角色<select name="role"><option value="member">成员</option><option value="admin">管理员</option></select></label></div><div class="cc-actions" style="padding:0"><span class="sched-err" id="set-adduser-err"></span><span class="spacer"></span><button class="btn primary sm">添加</button></div></form>`;
+    return;
+  }
   if (tab === "general") {
     const notify = store.get("notify", "0") === "1";
     body.innerHTML = `<div class="set-row"><div><b>外观</b><div class="muted">浅色、深色或跟随系统</div></div><select id="set-theme">${[["auto", "跟随系统"], ["light", "浅色"], ["dark", "深色"]].map(([v, l]) => `<option value="${v}" ${store.get("theme", "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>` +
@@ -2274,9 +2289,20 @@ function bind() {
   $(".me").onclick = () => openSettings();
   $("#set-close").onclick = () => $("#settings-modal").classList.add("hidden");
   $("#set-tabs").onclick = (e) => { const b = e.target.closest("[data-set]"); if (b) openSettings(b.dataset.set); };
+  $("#set-body").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, data = Object.fromEntries(new FormData(f));
+    const call = async (url, body, method = "POST") => { const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return [r.ok, await r.json().catch(() => ({}))]; };
+    if (f.id === "set-setup") { const [ok, j] = await call("/api/auth/setup", data); if (!ok) return ($("#set-setup-err").textContent = j.detail || "创建失败"); location.reload(); }
+    if (f.id === "set-pw") { const [ok, j] = await call("/api/auth/password", data); $("#set-pw-err").textContent = ok ? "已修改" : (j.detail || "修改失败"); }
+    if (f.id === "set-adduser") { const [ok, j] = await call("/api/users", data); if (!ok) return ($("#set-adduser-err").textContent = j.detail || "添加失败"); openSettings("members"); }
+  });
   $("#set-body").addEventListener("change", (e) => { if (e.target.id === "set-theme") { store.set("theme", e.target.value); applyTheme(e.target.value); } });
   $("#set-body").addEventListener("click", async (e) => {
     const g = e.target.closest("[data-set-goto]"); if (g) { e.preventDefault(); $("#settings-modal").classList.add("hidden"); openSession(g.dataset.setGoto); return; }
+    if (e.target.closest("#set-logout")) { await fetch("/api/auth/logout", { method: "POST" }); location.reload(); return; }
+    const del = e.target.closest("[data-user-del]");
+    if (del && confirm("删除这个成员？他的任务和数据会保留在服务器上，但无法再登录。")) { await fetch(`/api/users/${del.dataset.userDel}`, { method: "DELETE" }); openSettings("members"); return; }
     const n = e.target.closest("#set-notify"); if (!n) return;
     const on = store.get("notify", "0") !== "1";
     if (on && window.Notification && Notification.permission !== "granted") { if ((await Notification.requestPermission()) !== "granted") return; }
@@ -2390,8 +2416,34 @@ async function deleteSession(sid) {
 }
 
 // ------------------------------------------------------------------ init ---
+// ---- sign-in: any 401 from the API shows the login screen
+const _fetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const r = await _fetch(...args);
+  if (r.status === 401 && String(args[0]).startsWith("/api/") && !String(args[0]).startsWith("/api/auth/")) showLogin();
+  return r;
+};
+function showLogin() {
+  $("#auth-screen").classList.remove("hidden");
+  $("#auth-feishu").classList.toggle("hidden", !S.auth?.feishu);
+  $("#auth-form").username.focus();
+}
+async function checkAuth() {
+  try { S.auth = await (await _fetch("/api/auth/me")).json(); } catch { S.auth = { enabled: false }; }
+  S.me = S.auth.user;
+  if (S.auth.enabled && !S.me) { showLogin(); return false; }
+  return true;
+}
+
 (async function init() {
   hydrateIcons();
+  $("#auth-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target, r = await _fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: f.username.value, password: f.password.value }) });
+    if (!r.ok) { $("#auth-err").textContent = (await r.json().catch(() => ({}))).detail || "登录失败"; return; }
+    location.reload();
+  };
+  if (!(await checkAuth())) return;
   applyTheme(store.get("theme", "auto"));
   if (store.get("nav-collapsed", "0") === "1") document.body.classList.add("nav-collapsed");
   bind();

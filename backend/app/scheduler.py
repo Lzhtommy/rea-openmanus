@@ -119,12 +119,12 @@ class Scheduler:
         nxt = next_run(s["schedule"], now or datetime.now(), last) if s["enabled"] else None
         s["nextRunAt"] = nxt.timestamp() if nxt else None
 
-    def create(self, title: str, prompt: str, schedule: dict, source: str = "user") -> dict:
+    def create(self, title: str, prompt: str, schedule: dict, source: str = "user", owner: str | None = None) -> dict:
         if not str(prompt).strip():
             raise ScheduleError("prompt is required")
         s = {"id": uuid.uuid4().hex[:12], "title": (title or prompt)[:60].strip(), "prompt": prompt.strip(),
              "schedule": validate(schedule), "enabled": True, "createdAt": time.time(), "source": source,
-             "lastRunAt": None, "nextRunAt": None, "runs": []}
+             "lastRunAt": None, "nextRunAt": None, "runs": [], "owner": owner}
         self._plan(s)
         self.items[s["id"]] = s
         self.save()
@@ -154,6 +154,7 @@ class Scheduler:
         session = self.store.create()
         session.title = f"{s['title']} · {datetime.now():%m-%d %H:%M}"
         session.schedule_id = sid
+        session.owner = s.get("owner")
         session.persist()
         s["lastRunAt"] = now or time.time()
         s["runs"] = ([session.session_id] + s["runs"])[:50]

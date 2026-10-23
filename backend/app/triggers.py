@@ -108,14 +108,14 @@ class Triggers:
             if int(t.get("everyMinutes") or 0) < MIN_EVERY:
                 raise TriggerError(f"检查间隔至少 {MIN_EVERY} 分钟")
 
-    def create(self, body: dict, source: str = "user") -> dict:
+    def create(self, body: dict, source: str = "user", owner: str | None = None) -> dict:
         kind = body.get("kind")
         if kind not in KINDS:
             raise TriggerError("kind must be webhook or condition")
         prompt = str(body.get("prompt") or "").strip()
         t = {"id": uuid.uuid4().hex[:12], "kind": kind, "title": (str(body.get("title") or "").strip() or prompt)[:60],
              "prompt": prompt, "enabled": True, "createdAt": time.time(), "source": source, "runs": [],
-             "lastFiredAt": None}
+             "lastFiredAt": None, "owner": owner}
         if kind == "webhook":
             t["token"] = secrets.token_urlsafe(18)
         else:
@@ -161,6 +161,7 @@ class Triggers:
         session = self.store.create()
         session.title = f"{t['title']} · {datetime.now():%m-%d %H:%M}"
         session.trigger_id = tid
+        session.owner = t.get("owner")
         session.persist()
         t["lastFiredAt"] = time.time()
         t["runs"] = ([session.session_id] + t["runs"])[:50]

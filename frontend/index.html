@@ -327,6 +327,18 @@
     </form>
   </div>
 
+  <div id="auth-screen" class="hidden">
+    <form class="auth-card" id="auth-form" autocomplete="on">
+      <div class="auth-brand"><span class="brand-mark" data-icon="logo"></span><span class="brand-word">openmanus</span></div>
+      <h2 id="auth-title">登录</h2>
+      <label>用户名<input name="username" autocomplete="username" required /></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required /></label>
+      <div class="sched-err" id="auth-err"></div>
+      <button class="btn primary" type="submit">登录</button>
+      <a class="btn ghost hidden" id="auth-feishu" href="/api/auth/feishu/login">使用飞书登录</a>
+    </form>
+  </div>
+
   <div id="settings-modal" class="hidden">
     <div class="sched-card settings-card">
       <div class="settings-nav"><div class="settings-title">设置</div><div id="set-tabs"></div></div>
