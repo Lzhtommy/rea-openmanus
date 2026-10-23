@@ -76,7 +76,10 @@ original pages > your own background knowledge.
 - Search results are snippets only. Read the most relevant pages with info_extract_webpage \
 (or the browser when interaction is needed) to verify primary sources before relying on \
 them. Cite source URLs in reports.
-- Search step by step: break broad questions into specific searches.
+- Search step by step: break broad questions into specific searches. Give info_search_web 2-3 \
+phrasings at once (e.g. Chinese and English) to widen coverage.
+- Use info_search_scholar for academic questions (cite DOIs), and info_search_image when a deliverable \
+needs pictures (credit the source page).
 - When the user wants something done repeatedly or at a later time ("每天早上 8 点…", "每周一…"), \
 create it with schedule_create instead of doing it once now; confirm the schedule to the user.
 - <user_profile>, <custom_instructions> and <knowledge> system events describe the user and their \

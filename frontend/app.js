@@ -60,6 +60,7 @@ const ICONS = {
   spark: '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
   github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.1-1.3-.3-2.5-1-3.5.3-1.2.3-2.4 0-3.5 0 0-1 0-3 1.5-2.6-.5-5.4-.5-8 0C6 2 5 2 5 2c-.3 1.1-.3 2.3 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.4.5-.7 1-.8 1.6-.2.6-.3 1.3-.2 1.9v4"/><path d="M9 18c-4.5 2-5-2-7-2"/>',
+  book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   brain: '<path d="M12 5a3 3 0 1 0-6 .1 4 4 0 0 0-2.5 5.9A4 4 0 0 0 6 18a3 3 0 0 0 6 0z"/><path d="M12 5a3 3 0 1 1 6 .1 4 4 0 0 1 2.5 5.9A4 4 0 0 1 18 18a3 3 0 0 1-6 0zM12 5v13"/>',
@@ -97,6 +98,8 @@ const TOOL = {
   webpage_extract: { icon: "compass", use: "浏览器", round: true },
   text_editor: { icon: "pencil", use: "编辑器" },
   search: { icon: "search", use: "搜索" },
+  search_image: { icon: "image", use: "图片搜索" },
+  search_scholar: { icon: "book", use: "学术搜索" },
   map_reduce: { icon: "layers", use: "并行子任务" },
   deploy: { icon: "rocket", use: "部署服务" },
   schedule: { icon: "clock", use: "自动化" },
@@ -105,7 +108,7 @@ const TOOL = {
 };
 const ACTION_ZH = {
   "Executing command": "执行命令", "Checking terminal": "查看终端", Browsing: "浏览", Typing: "输入", Clicking: "点击",
-  "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务", "Searching tools": "搜索工具", "Using MCP": "调用工具", "Saving knowledge": "提议记住",
+  "Running JavaScript": "执行 JavaScript", "Reading file": "读取文件", "Editing file": "编辑文件", "Searching files": "搜索文件", "Creating scheduled task": "创建定时任务", "Searching tools": "搜索工具", "Using MCP": "调用工具", "Saving knowledge": "提议记住", "Searching images": "搜索图片", "Searching papers": "搜索论文",
   Searching: "搜索", "Reading webpage": "提取网页", "Running parallel sub-agents": "并行执行子任务", "Exposing port": "部署预览",
 };
 const zh = (a) => ACTION_ZH[a] || a || "";
@@ -385,7 +388,9 @@ function summarize(steps) {
   const c = { q: 0, web: 0, bro: 0, edit: new Set(), read: new Set(), cmd: 0, term: 0, mr: 0, dep: 0, find: 0 };
   for (const s of steps) {
     const n = s.name || "";
-    if (n === "info_search_web") c.q++;
+    if (n === "info_search_web") c.q += Math.max(1, s.detail?.search?.queries?.length || 1);
+    else if (n === "info_search_image") c.img = (c.img || 0) + 1;
+    else if (n === "info_search_scholar") c.sch = (c.sch || 0) + 1;
     else if (n === "info_extract_webpage" || n === "browser_navigate" || n === "browser_restart") c.web++;
     else if (n.startsWith("browser_")) c.bro++;
     else if (n === "file_read") c.read.add(s.message?.param);
@@ -402,6 +407,8 @@ function summarize(steps) {
   }
   const parts = [];
   if (c.q) parts.push(`已搜索 ${c.q} 个查询`);
+  if (c.img) parts.push(`搜索了 ${c.img} 次图片`);
+  if (c.sch) parts.push(`检索了 ${c.sch} 次论文`);
   if (c.web) parts.push(`浏览了 ${c.web} 个网页`);
   if (c.bro) parts.push(`操作了 ${c.bro} 次浏览器`);
   if (c.edit.size) parts.push(`编辑了 ${c.edit.size} 个文件`);
@@ -601,10 +608,19 @@ function stepView(s) {
   if (d.browser?.screenshot) return `<img class="shot" src="${esc(d.browser.screenshot)}" alt="" />`;
   if (d.browser?.console) return `<div class="term">${esc(d.browser.console)}</div>`;
   if (d.webpageExtract) return `<div class="page-md"><div class="prose">${md(d.webpageExtract.markdown)}</div></div>`;
-  if (d.search) return `<div class="serp"><div class="serp-q">${icon("search")} ${esc(d.search.query)}</div>${(d.search.results || []).map((r) => {
-    const h = hostOf(r.url);
-    return `<a class="serp-item" href="${esc(r.url)}" target="_blank"><div class="serp-title"><span class="fav">${esc((h[0] || "?").toUpperCase())}</span><span>${esc(r.title)}</span></div><div class="serp-snip">${esc(r.snippet)}</div><div class="serp-url">${esc(h)}</div></a>`;
-  }).join("")}</div>`;
+  if (d.search) {
+    const qs = d.search.queries || [d.search.query];
+    return `<div class="serp"><div class="serp-q">${icon("search")}${qs.map((q) => `<span class="q-chip">${esc(q)}</span>`).join("")}</div>${(d.search.results || []).map((r) => {
+      const h = hostOf(r.url);
+      return `<a class="serp-item" href="${esc(r.url)}" target="_blank"><div class="serp-title"><span class="fav" style="background-image:url('https://icons.duckduckgo.com/ip3/${esc(h)}.ico')">${esc((h[0] || "?").toUpperCase())}</span><span>${esc(r.title)}</span></div><div class="serp-snip">${esc(r.snippet)}</div><div class="serp-url">${esc(h)}${qs.length > 1 && r.query ? ` · ${esc(r.query)}` : ""}</div></a>`;
+    }).join("")}</div>`;
+  }
+  if (d.searchImage) return `<div class="serp"><div class="serp-q">${icon("image")}<span class="q-chip">${esc(d.searchImage.query)}</span></div><div class="img-grid">${(d.searchImage.results || []).map((r) =>
+    `<a class="img-item" href="${esc(r.source || r.image)}" target="_blank" title="${esc(r.title)}"><img src="${esc(r.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer" /><span>${esc(r.width ? `${r.width}×${r.height}` : hostOf(r.source || r.image))}</span></a>`).join("")}</div></div>`;
+  if (d.searchScholar) return `<div class="serp"><div class="serp-q">${icon("book")}<span class="q-chip">${esc(d.searchScholar.query)}</span></div>${(d.searchScholar.results || []).map((r) =>
+    `<div class="serp-item paper"><a class="serp-title" href="${esc(r.url)}" target="_blank"><span>${esc(r.title)}</span></a>` +
+    `<div class="serp-url">${esc((r.authors || []).slice(0, 4).join(", "))}${r.authors?.length > 4 ? " 等" : ""} · ${esc(r.year || "")}${r.venue ? ` · ${esc(r.venue)}` : ""} · 被引 ${esc(r.citations)}</div>` +
+    (r.abstract ? `<div class="serp-snip">${esc(r.abstract)}</div>` : "") + (r.pdf ? `<a class="paper-pdf" href="${esc(r.pdf)}" target="_blank">${icon("fileDoc")}PDF</a>` : "") + `</div>`).join("")}</div>`;
   if (d.textEditor) return editorHtml(d.textEditor);
   if (d.mapReduce) {
     // Manus' map_reduce controls: stop / retry one item, or continue now with what is finished
@@ -958,13 +974,16 @@ function renderSessions() {
 
 // ------------------------------------------------------------------ library (资料库) ---
 // Every file kept outside the sandboxes (deliverables, files the agent wrote, uploads), across tasks.
-const LIB_TABS = [["all", "全部"], ["doc", "文档"], ["image", "图片"], ["code", "代码"], ["data", "数据"], ["other", "其他"]];
+// Manus' 资料库 categories
+const LIB_TABS = [["all", "全部"], ["doc", "文本和 PDF"], ["slides", "幻灯片"], ["sheet", "表格"], ["image", "图片"], ["video", "视频"], ["audio", "音频"], ["other", "其他"]];
 function fileKind(name) {
   const e = ext(name);
   if (IMG.has(e)) return "image";
-  if (["md", "markdown", "txt", "pdf", "docx", "doc", "pptx", "html"].includes(e)) return "doc";
-  if (["py", "js", "ts", "css", "sh", "json", "yaml", "yml"].includes(e)) return "code";
-  if (["csv", "xlsx", "xls", "parquet", "sqlite"].includes(e)) return "data";
+  if (["md", "markdown", "txt", "pdf", "docx", "doc", "rtf", "html"].includes(e)) return "doc";
+  if (["pptx", "ppt", "key"].includes(e) || /slides?\.html$/i.test(name)) return "slides";
+  if (["csv", "xlsx", "xls", "tsv", "numbers"].includes(e)) return "sheet";
+  if (["mp4", "mov", "webm", "mkv", "avi"].includes(e)) return "video";
+  if (["mp3", "wav", "m4a", "ogg", "flac", "aac"].includes(e)) return "audio";
   return "other";
 }
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -983,7 +1002,7 @@ function renderLibrary() {
   const q = S.libQuery.trim().toLowerCase();
   const counts = Object.fromEntries(LIB_TABS.map(([k]) => [k, 0]));
   S.library.forEach((f) => { counts.all++; counts[fileKind(f.filename)]++; });
-  $("#lib-tabs").innerHTML = LIB_TABS.filter(([k]) => k === "all" || counts[k]).map(([k, label]) =>
+  $("#lib-tabs").innerHTML = LIB_TABS.map(([k, label]) =>
     `<button class="lib-tab ${S.libFilter === k ? "on" : ""}" data-tab="${k}">${label}<span>${counts[k]}</span></button>`).join("");
   const rows = S.library.filter((f) => (S.libFilter === "all" || fileKind(f.filename) === S.libFilter) &&
     (!q || f.filename.toLowerCase().includes(q) || String(f.sessionTitle).toLowerCase().includes(q)));

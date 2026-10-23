@@ -101,10 +101,20 @@ _TOOLS = [
     _t("browser_restart", "Restart the browser (clears state) and open a URL.", {"url": S}, ["url"]),
     # ---- information
     _t("info_search_web",
-       "Search the web. Returns titles, URLs, and snippets. Open pages with the browser to "
-       "read full content.",
-       {"query": S, "date_range": {"type": "string",
-                                   "enum": ["all", "past_day", "past_week", "past_month", "past_year"]}},
+       "Search the web. Pass 1-3 differently phrased queries in `queries` (e.g. Chinese and English, or "
+       "different angles); they run together. Returns titles, URLs, and snippets per query. Read the pages "
+       "with info_extract_webpage or the browser for full content.",
+       {"queries": {"type": "array", "items": S, "description": "1-3 search queries"},
+        "query": {"type": "string", "description": "A single query (alternative to queries)"},
+        "date_range": {"type": "string", "enum": ["all", "past_day", "past_week", "past_month", "past_year"]}}),
+    _t("info_search_image",
+       "Search for images. Returns image URLs with their source pages and sizes. Use to find pictures for "
+       "reports, slides or websites; download chosen ones with shell (curl -L -o) and check them before use.",
+       {"query": S}, ["query"]),
+    _t("info_search_scholar",
+       "Search academic literature (papers, theses, conference articles). Returns title, authors, year, venue, "
+       "citation count, abstract, DOI link and an open-access PDF link when one exists.",
+       {"query": S, "year_from": {"type": "integer", "description": "Only works published from this year on"}},
        ["query"]),
     _t("info_extract_webpage",
        "Fetch a web page in a separate headless tab and return its readable text, without "
@@ -200,8 +210,14 @@ def needs_confirm(name: str, args: dict) -> str | None:
 
 # Read-only tools without shared state. When every call in a turn is one of these they
 # run concurrently (Manus fires several webpage_extract / search calls at once).
-PARALLEL_SAFE = {"info_search_web", "info_extract_webpage", "file_read", "file_find_in_content", "mcp_search_tools",
+PARALLEL_SAFE = {"info_search_web", "info_search_image", "info_search_scholar", "info_extract_webpage", "file_read", "file_find_in_content", "mcp_search_tools",
                  "file_find_by_name"}
+
+
+def search_queries(args: dict) -> list[str]:
+    qs = args.get("queries") if isinstance(args.get("queries"), list) else []
+    qs = [str(q).strip() for q in qs + [args.get("query") or ""] if str(q).strip()]
+    return list(dict.fromkeys(qs))[:3]
 
 
 def is_allowed(role: str, name: str) -> bool:
@@ -219,6 +235,10 @@ def ui_category(name: str) -> str:
         return "text_editor"
     if name == "info_search_web":
         return "search"
+    if name == "info_search_image":
+        return "search_image"
+    if name == "info_search_scholar":
+        return "search_scholar"
     if name == "info_extract_webpage":
         return "webpage_extract"
     if name == "agent_map_reduce":
@@ -267,7 +287,11 @@ def describe(name: str, args: dict) -> tuple[str, str]:
     if name == "browser_console_exec":
         return "Running JavaScript", args.get("javascript", "")[:120]
     if name == "info_search_web":
-        return "Searching", args.get("query", "")
+        return "Searching", " | ".join(search_queries(args))
+    if name == "info_search_image":
+        return "Searching images", args.get("query", "")
+    if name == "info_search_scholar":
+        return "Searching papers", args.get("query", "")
     if name == "info_extract_webpage":
         return "Reading webpage", args.get("url", "")
     if name == "agent_map_reduce":

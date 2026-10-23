@@ -645,3 +645,41 @@ async def test_skills_library(store, monkeypatch, tmp_path):
     assert "先写结论" in read["detail"]["textEditor"]["content"]  # installed although disabled
     assert st.state["weekly-report"]["uses"] == 1
     assert next(e for e in s.events if e["type"] == "chat")["skills"] == ["weekly-report"]
+
+
+@pytest.mark.asyncio
+async def test_search_variants(store, monkeypatch):
+    """Several queries in one call run together; image and scholar search return their own details."""
+    async def imgs(q, limit=12):
+        return [{"image": "https://x/a.jpg", "thumbnail": "https://x/t.jpg", "title": "A", "source": "https://x", "width": 800, "height": 600}]
+
+    async def papers(q, year_from=None, limit=10):
+        return [{"title": "Paper", "authors": ["Li"], "year": 2025, "venue": "ICRA", "citations": 3,
+                 "url": "https://doi.org/1", "pdf": "", "abstract": "We study drones."}]
+    seen = []
+
+    async def web(q, date_range="all", limit=10):
+        seen.append((q, limit))
+        if q == "bad":
+            raise RuntimeError("boom")
+        return [{"title": q, "url": "https://same.example", "snippet": "s"}]
+    monkeypatch.setattr(agent_mod, "search_web", web)
+    monkeypatch.setattr(agent_mod, "search_images", imgs)
+    monkeypatch.setattr(agent_mod, "search_scholar", papers)
+    model = ScriptedModel([msg(tool("info_search_web", queries=["无人机", "drone", "bad"]), tool("info_search_image", query="drone"),
+                               tool("info_search_scholar", query="drone", year_from=2020)),
+                           msg(tool("info_search_web")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("搜一下", [])
+    await wait_status(s, {"idle"})
+    done = {e["name"]: e for e in s.events if e["type"] == "toolUsed" and e["status"] == "success"}
+    assert done["info_search_web"]["detail"]["search"]["queries"] == ["无人机", "drone", "bad"]
+    assert {q for q, n in seen} == {"无人机", "drone", "bad"} and all(n == 6 for _, n in seen)
+    result = next(b for m in s.messages if m["role"] == "user" for b in m["content"] if isinstance(b, dict)
+                  and b.get("type") == "tool_result" and "## drone" in str(b.get("content")))
+    assert "Search failed: boom" in result["content"] and not result.get("is_error")
+    assert done["info_search_image"]["detail"]["searchImage"]["results"][0]["width"] == 800
+    assert done["info_search_scholar"]["detail"]["searchScholar"]["results"][0]["venue"] == "ICRA"
+    empty = [e for e in s.events if e.get("name") == "info_search_web" and e["status"] == "error"]
+    assert empty  # no query at all is an error the model sees

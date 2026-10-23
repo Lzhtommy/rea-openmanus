@@ -24,8 +24,8 @@ from typing import Awaitable, Callable
 from . import config, connectors, llm, providers
 from .prompts import SUBAGENT_BRIEF
 from .sandbox import Sandbox, SandboxError
-from .search import search_web
-from .tools import PARALLEL_SAFE, REQUIRED, TOOL_NAMES, describe, is_allowed, needs_confirm, ui_category
+from .search import search_images, search_scholar, search_web
+from .tools import PARALLEL_SAFE, REQUIRED, TOOL_NAMES, describe, is_allowed, needs_confirm, search_queries, ui_category
 
 log = logging.getLogger("manus.agent")
 
@@ -383,9 +383,37 @@ class Agent:
 
         # ---- search
         if name == "info_search_web":
-            results = await search_web(a["query"], a.get("date_range", "all"))
-            text = "\n\n".join(f"[{i + 1}] {x['title']}\n{x['url']}\n{x['snippet']}" for i, x in enumerate(results))
-            return ToolOutcome(text or "No results.", {"search": {"query": a["query"], "results": results}})
+            queries = search_queries(a)
+            if not queries:
+                return ToolOutcome("Pass at least one query in `queries`.", is_error=True)
+            per = 10 if len(queries) == 1 else 6
+            found = await asyncio.gather(*(search_web(q, a.get("date_range", "all"), per) for q in queries), return_exceptions=True)
+            parts, results, seen = [], [], set()
+            for q, res in zip(queries, found):
+                if isinstance(res, BaseException):
+                    parts.append(f"## {q}\nSearch failed: {res}")
+                    continue
+                rows = []
+                for x in res:
+                    dup = x["url"] in seen
+                    seen.add(x["url"])
+                    rows.append(f"[{len(results) + 1}] {x['title']}\n{x['url']}" + ("" if dup else f"\n{x['snippet']}"))
+                    results.append({**x, "query": q})
+                parts.append(f"## {q}\n" + ("\n\n".join(rows) or "No results."))
+            if all(isinstance(r, BaseException) for r in found):
+                return ToolOutcome("\n\n".join(parts), is_error=True, detail={"error": str(found[0])})
+            return ToolOutcome("\n\n".join(parts), {"search": {"queries": queries, "query": queries[0], "results": results}})
+        if name == "info_search_image":
+            results = await search_images(a["query"])
+            text = "\n\n".join(f"[{i + 1}] {x['title']}\nimage: {x['image']}" + (f" ({x['width']}x{x['height']})" if x.get("width") else "")
+                               + (f"\nsource page: {x['source']}" if x.get("source") else "") for i, x in enumerate(results))
+            return ToolOutcome(text or "No images found.", {"searchImage": {"query": a["query"], "results": results}})
+        if name == "info_search_scholar":
+            results = await search_scholar(a["query"], a.get("year_from"))
+            text = "\n\n".join(f"[{i + 1}] {x['title']} ({x['year']})\n{', '.join(x['authors'])}" + (f" — {x['venue']}" if x['venue'] else "")
+                               + f"\ncited by {x['citations']} · {x['url']}" + (f"\nPDF: {x['pdf']}" if x['pdf'] else "")
+                               + (f"\nAbstract: {x['abstract']}" if x['abstract'] else "") for i, x in enumerate(results))
+            return ToolOutcome(text or "No papers found.", {"searchScholar": {"query": a["query"], "results": results}})
         if name == "info_extract_webpage":
             r = await sb.call("/web/extract", {"url": a["url"]})
             note = f"\n...[truncated, {r['total_chars']} chars total; use the browser to read further]" if r["truncated"] else ""

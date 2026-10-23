@@ -6,7 +6,7 @@
 
 ## 功能
 - **Agent Loop**：分析事件 → 选择工具 → 沙箱执行 → 观察 → 迭代 → 交付 → idle
-- **34 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`、`info_extract_webpage`、`deploy_expose_port`、`message_*`、`plan_update`、`agent_map_reduce`、`schedule_create`、`knowledge_save`、`mcp_*`、`idle`
+- **36 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`（一次 1–3 个查询并发）、`info_search_image`（图片）、`info_search_scholar`（OpenAlex 学术文献）、`info_extract_webpage`、`deploy_expose_port`、`message_*`、`plan_update`、`agent_map_reduce`、`schedule_create`、`knowledge_save`、`mcp_*`、`idle`
 - **并行工具调用**：一轮里如果全是只读调用（搜索、网页提取、读文件），就并发执行
 - **Planner 模块**：结构化输出生成计划
 - **技能**（"更多 → 技能"）：官方技能（`backend/skills/`）、个人技能（手动编写、上传 SKILL.md/zip、或让 Agent 用内置的技能创建器写好后在文件卡片上"添加到我的技能"）、第三方技能（从 GitHub 目录导入，探索页有精选目录）；可启用/停用、在线编辑、统计使用次数；输入框"+ → 使用技能"把技能指定给当前消息（对应 Manus 的 `enabledSkills`）。启用的技能整目录装进沙箱，上下文里只放名称和触发说明，Agent 按需读取
@@ -17,7 +17,7 @@
 - **实时画面与接管**：浏览器跑在 Xvfb 虚拟显示器上，经 VNC 实时推到"电脑"面板（noVNC）；用户可一键接管浏览器（登录、验证码），结束后交还 Agent
 - **操作确认**：部署、推送代码、发布、对外发送数据、远程登录、大范围删除等操作会挂起（`need_confirm`），用户允许后才执行，拒绝则作为错误返回模型
 - **流式输出**：回复和 `message_*` 的文本边生成边推送（`chatDelta`）
-- **文件持久化与资料库**：Agent 写入/交付的文件和用户上传都另存到会话目录，容器删除后仍可下载；"资料库"跨任务浏览、筛选、预览
+- **文件持久化与资料库**：Agent 写入/交付的文件和用户上传都另存到会话目录，容器删除后仍可下载；"资料库"跨任务浏览，按文本和 PDF / 幻灯片 / 表格 / 图片 / 视频 / 音频 / 其他筛选、预览
 - **模式与 Flex**：顶栏切换 Max / 标准 / Lite（网关上的不同模型和推理强度）；Flex 用自己的密钥接 OpenAI、Anthropic、Google、xAI、DeepSeek、Kimi、智谱、通义千问、硅基流动、OpenRouter、Fireworks 或任意 OpenAI 兼容端点，也可直接选网关上的其他模型
 - **连接器（MCP）**：stdio / Streamable HTTP / SSE；工具不进工具表，Agent 用 `mcp_search_tools` 按需检索、`mcp_call_tool` 调用；非只读工具调用前需确认
 - **分享回放**：生成只读链接（可撤销），访客可浏览工作日志、电脑面板并按原节奏回放
