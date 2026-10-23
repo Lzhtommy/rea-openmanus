@@ -423,6 +423,10 @@ class Session(AgentHost):
                         "read-only commands to look around." + (" The browser is the user's own Chrome with their logins: "
                         "do not change account settings, buy, post or send anything without asking." if dev.get("myBrowser") else "")
                         + "\n</environment>")
+                from . import mail
+                if mail.enabled():
+                    system_notes[-1] = system_notes[-1].replace("</environment>",
+                        f"Your mailbox: {mail.CFG['ADDRESS'] or mail.CFG['USER']} (email_send / email_check).\n</environment>")
                 self.env_announced = True
             if self.project_id and projects.store and self.project_id in projects.store.items and not self.project_announced:
                 paths = await projects.store.install(self.project_id, sandbox)

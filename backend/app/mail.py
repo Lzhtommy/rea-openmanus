@@ -133,3 +133,36 @@ class MailManus:
 
 
 poller: MailManus | None = None
+
+
+def send_with_files(to: str, subject: str, text: str, files: list[tuple[str, bytes]]) -> None:
+    """The agent's outgoing mail (email_send)."""
+    if not CFG["SMTP_HOST"]:
+        raise RuntimeError("no mailbox configured (MANUS_MAIL_SMTP_HOST)")
+    m = EmailMessage()
+    m["From"], m["To"], m["Subject"] = CFG["ADDRESS"] or CFG["USER"], to, subject
+    m.set_content(text)
+    for name, data in files:
+        m.add_attachment(data, maintype="application", subtype="octet-stream", filename=name)
+    with smtplib.SMTP_SSL(CFG["SMTP_HOST"]) as s:
+        s.login(CFG["USER"], CFG["PASSWORD"])
+        s.send_message(m)
+
+
+def recent(limit: int = 10, query: str = "") -> list[dict]:
+    """The agent's inbox (email_check): newest messages, without marking them read."""
+    if not enabled():
+        raise RuntimeError("no mailbox configured (MANUS_MAIL_IMAP_HOST / USER / PASSWORD)")
+    with imaplib.IMAP4_SSL(CFG["IMAP_HOST"]) as box:
+        box.login(CFG["USER"], CFG["PASSWORD"])
+        box.select("INBOX", readonly=True)
+        _, data = box.search(None, "ALL")
+        out = []
+        for num in reversed(data[0].split()[-50:]):
+            _, msg = box.fetch(num, "(BODY.PEEK[])")
+            m = parse(msg[0][1])
+            if not query or query.lower() in (m["subject"] + m["body"] + m["sender"]).lower():
+                out.append({k: m[k] for k in ("sender", "subject", "body")} | {"attachments": [n for n, _ in m["attachments"]]})
+            if len(out) >= limit:
+                break
+        return out

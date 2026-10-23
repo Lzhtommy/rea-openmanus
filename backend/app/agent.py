@@ -524,6 +524,25 @@ class Agent:
             return ToolOutcome(f"Trigger \"{t['title']}\" created: {how}. The user can manage it under 自动化 → 触发器.",
                                {"trigger": t})
 
+        # ---- mailbox
+        if name in ("email_send", "email_check"):
+            from . import mail
+            try:
+                if name == "email_check":
+                    rows = await asyncio.to_thread(mail.recent, min(int(a.get("limit") or 10), 30), a.get("query") or "")
+                    text = "\n\n".join(f"From: {m['sender']}\nSubject: {m['subject']}\n{m['body'][:1500]}"
+                                       + (f"\nAttachments: {', '.join(m['attachments'])}" if m["attachments"] else "") for m in rows)
+                    return ToolOutcome(text or "No emails.", {"mail": {"action": "check", "count": len(rows)}})
+                files = []
+                for p in (a.get("attachments") or [])[:10]:
+                    r = await sb.http.get("/file/download", params={"path": p})
+                    if r.status_code == 200:
+                        files.append((p.rsplit("/", 1)[-1], r.content))
+                await asyncio.to_thread(mail.send_with_files, a["to"], a["subject"], a["body"], files)
+                return ToolOutcome(f"Email sent to {a['to']}.", {"mail": {"action": "send", "to": a["to"], "subject": a["subject"]}})
+            except Exception as e:  # noqa: BLE001 — not configured, auth or network errors go back to the model
+                return ToolOutcome(f"Email failed: {e}", is_error=True, detail={"error": str(e)})
+
         # ---- knowledge
         if name == "knowledge_save":
             try:

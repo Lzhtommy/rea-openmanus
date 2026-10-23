@@ -1159,3 +1159,28 @@ async def test_feishu_bot(store, monkeypatch):
             break
         await asyncio.sleep(0.1)
     assert s.messages[0]["content"][0]["text"].startswith("明天天气") and sent[0][0] == "om_1" and "明天晴" in sent[0][1]
+
+
+@pytest.mark.asyncio
+async def test_agent_mailbox(store, monkeypatch):
+    """email_send waits for approval and attaches sandbox files; email_check reads the inbox."""
+    from app import mail
+    sent = []
+    monkeypatch.setattr(mail, "send_with_files", lambda to, subj, text, files: sent.append((to, subj, [n for n, _ in files])))
+    monkeypatch.setattr(mail, "recent", lambda limit, query: [{"sender": "a@x.com", "subject": "发票", "body": "见附件", "attachments": ["i.pdf"]}])
+    model = ScriptedModel([msg(tool("file_write", file="r.md", content="x")),
+                           msg(tool("email_send", to="boss@x.com", subject="周报", body="见附件", attachments=["r.md"])),
+                           msg(tool("email_check", query="发票")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("发周报", [])
+    for _ in range(200):
+        if s.pending_confirms:
+            break
+        await asyncio.sleep(0.05)
+    assert not sent and next(e for e in s.events if e.get("status") == "need_confirm")["name"] == "email_send"
+    s.resolve_confirm(next(iter(s.pending_confirms)), True)
+    await wait_status(s, {"idle"})
+    assert sent == [("boss@x.com", "周报", ["r.md"])]
+    chk = next(e for e in s.events if e.get("name") == "email_check" and e["status"] == "success")
+    assert chk["detail"]["mail"]["count"] == 1

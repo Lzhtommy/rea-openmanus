@@ -6,7 +6,7 @@
 
 ## 功能
 - **Agent Loop**：分析事件 → 选择工具 → 沙箱执行 → 观察 → 迭代 → 交付 → idle
-- **43 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`（一次 1–3 个查询并发）、`info_search_image`（图片）、`info_search_scholar`（OpenAlex 学术文献）、`info_extract_webpage`、`deploy_expose_port`、`deploy_publish`、`message_*`、`plan_update`、`agent_map_reduce`、`agent_delegate`、`schedule_create`、`trigger_create`、`knowledge_save`、`slides_export`、`media_generate_image/speech/video`、`mcp_*`、`idle`
+- **45 个工具**：`shell_*`、`file_*`、`browser_*`（元素编号加截图视觉）、`info_search_web`（一次 1–3 个查询并发）、`info_search_image`（图片）、`info_search_scholar`（OpenAlex 学术文献）、`info_extract_webpage`、`deploy_expose_port`、`deploy_publish`、`message_*`、`plan_update`、`agent_map_reduce`、`agent_delegate`、`schedule_create`、`trigger_create`、`knowledge_save`、`slides_export`、`media_generate_image/speech/video`、`mcp_*`、`idle`
 - **并行工具调用**：一轮里如果全是只读调用（搜索、网页提取、读文件），就并发执行
 - **Planner 模块**：结构化输出生成计划
 - **技能**（"更多 → 技能"）：官方技能（`backend/skills/`）、个人技能（手动编写、上传 SKILL.md/zip、或让 Agent 用内置的技能创建器写好后在文件卡片上"添加到我的技能"）、第三方技能（从 GitHub 目录导入，探索页有精选目录）；可启用/停用、在线编辑、统计使用次数；输入框"+ → 使用技能"把技能指定给当前消息（对应 Manus 的 `enabledSkills`）。启用的技能整目录装进沙箱，上下文里只放名称和触发说明，Agent 按需读取
@@ -19,6 +19,7 @@
 - **执行前确认计划 / 排队 / 工具参数流式状态**："+ → 执行前确认计划"让 Planner 的计划先交给你确认（可直接逐行修改，或直接输入修改意见让它重新规划，对应 Manus 的 `confirm_submit_plan`）；任务运行中输入新消息时可选"排队"（`deliveryMode: queue`，当前任务完成后依次执行）或直接发送插话；模型还在生成工具参数时，步骤就以 `streaming` 状态出现
 - **首页 Studio 与灵感**：输入框下的创作入口（视频、网站应用游戏、从本地文件开始、幻灯片与图片）和按天轮换的灵感模板，"查看全部"按幻灯片 / 网站 / 游戏 / 应用 / 图片 / 视频 / 调研 / 数据 / 效率分类；选用后预填指令并指定相应技能
 - **数据管理与开发者 API**："设置 → 数据管理"导出个人全部数据（zip）或删除所有任务；"设置 → 开发者"创建 API 密钥（只显示一次、哈希保存），用 `POST /api/v1/tasks`、`GET /api/v1/tasks/<id>`、`POST /api/v1/tasks/<id>/messages` 从脚本创建任务、查询状态与结果、追加消息
+- **Agent 邮箱**：配置邮箱后 Agent 拥有自己的邮箱，`email_send` 发信（可附沙箱文件，每次发送都需确认）、`email_check` 读取收件箱
 - **飞书机器人（集成）**：把飞书应用的事件订阅地址设为 `/api/integrations/feishu/events`（订阅 `im.message.receive_v1`），在飞书里私聊或 @ 机器人即可派任务，完成后在原会话回复结果和任务链接；复用 `MANUS_FEISHU_APP_ID` / `_SECRET`，可设 `MANUS_FEISHU_VERIFICATION_TOKEN` 校验事件
 - **Mail Manus**：配置 `MANUS_MAIL_IMAP_HOST` / `MANUS_MAIL_USER` / `MANUS_MAIL_PASSWORD` 后每分钟收取新邮件，每封邮件成为一个任务（主题和正文是需求，附件上传到沙箱）；配置 `MANUS_MAIL_SMTP_HOST` 后任务完成时把结果和文件链接回信给发件人；多用户模式下只接受成员登记邮箱发来的邮件
 - **多用户登录**：没有账号时保持单用户模式；在"设置 → 账户"创建管理员后启用登录（现有数据归管理员），管理员在"成员"中添加账号。任务、项目、定时任务、触发器、站点、云电脑、设备、Agent 与团队、个性化按用户隔离；技能库与插件连接器为组织共享。支持飞书登录（`MANUS_FEISHU_APP_ID` / `MANUS_FEISHU_APP_SECRET`，`MANUS_FEISHU_AUTO_SIGNUP` 控制新飞书用户是否自动开通）；`MANUS_AUTH=off` 强制单用户

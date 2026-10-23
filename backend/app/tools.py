@@ -199,6 +199,12 @@ _TOOLS = [
         "prompt": {"type": "string", "description": "Full, self-contained instruction for each run"},
         "condition": S, "every_minutes": I},
        ["kind", "title", "prompt"]),
+    # ---- the agent's mailbox (Manus' 邮箱)
+    _t("email_send", "Send an email from your mailbox (see <environment>), optionally with sandbox files attached. "
+       "Always needs the user's approval.",
+       {"to": S, "subject": S, "body": S, "attachments": ATTACH}, ["to", "subject", "body"]),
+    _t("email_check", "Read recent emails in your mailbox (newest first), optionally filtered by a keyword.",
+       {"query": S, "limit": I}),
     # ---- knowledge (long-term memory across tasks)
     _t("knowledge_save",
        "Propose a durable fact or preference to remember for future tasks (e.g. the user's preferred report "
@@ -223,7 +229,7 @@ REQUIRED = {t["name"]: t["input_schema"]["required"] for t in TOOLS}
 # Role-based masking by prefix (the tool list itself never changes).
 ROLE_DENY = {
     "main": (),
-    "subagent": ("message_", "agent_", "schedule_", "knowledge_", "trigger_"),
+    "subagent": ("message_", "agent_", "schedule_", "knowledge_", "trigger_", "email_send"),
     # condition checks for triggers: observe only, nothing outward-facing or long-lived
     "watcher": ("message_", "agent_", "schedule_", "knowledge_", "trigger_", "deploy_", "mcp_call", "plan_"),
 }
@@ -248,6 +254,8 @@ def needs_confirm(name: str, args: dict) -> str | None:
         return "生成可公开访问的预览链接"
     if name == "deploy_publish":
         return "发布到固定网址，任何拿到链接的人都能访问"
+    if name == "email_send":
+        return "从 OpenManus 邮箱发送邮件"
     if name in ("shell_exec", "shell_write_to_process"):
         text = args.get("command") or args.get("input") or ""
         for pattern, reason in _RISKY_SHELL:
@@ -301,6 +309,8 @@ def ui_category(name: str) -> str:
         return "mcp"
     if name.startswith("knowledge_"):
         return "knowledge"
+    if name.startswith("email_"):
+        return "gmail"
     if name.startswith("slides_"):
         return "slides"
     if name.startswith("media_"):
@@ -372,6 +382,10 @@ def describe(name: str, args: dict) -> tuple[str, str]:
         return "Generating speech", args.get("output_path", "")
     if name == "media_generate_video":
         return "Generating video", args.get("output_path", "")
+    if name == "email_send":
+        return "Sending email", args.get("to", "")
+    if name == "email_check":
+        return "Checking email", args.get("query", "")
     if name == "knowledge_save":
         return "Saving knowledge", args.get("title") or args.get("content", "")[:60]
     return ACTION_LABEL.get(cat, name), ""
