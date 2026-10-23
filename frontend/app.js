@@ -139,6 +139,7 @@ const S = {
   attachments: [], previews: {},
   personal: { profile: {}, instructions: "", knowledge: [] }, persTab: "profile", editingKnow: null,
   plugins: { plugins: [], categories: [] }, plugCat: "all", plugOpen: null, sites: [], crTab: "all",
+  pcs: { computers: [], templates: [], unavailable: [], tasks: {} }, pcOpen: null, pcTab: "desktop", target: null,
   triggers: [], activity: [], autoTab: "activity", editingTrig: null,
   skills: { skills: [], catalog: [], categories: [] }, skTab: "explore", skCat: "all", skSrc: "all", pickedSkills: [], skillView: null,
 };
@@ -260,9 +261,11 @@ function scheduleRender(scrollEnd = false) {
 }
 
 function renderAll() {
-  const auto = S.view === "automations", conn = S.view === "connectors", plug = S.view === "plugins", cr = S.view === "creations";
+  const auto = S.view === "automations", conn = S.view === "connectors", plug = S.view === "plugins", cr = S.view === "creations", pcv = S.view === "computers";
   const proj = S.view === "project", pers = S.view === "personal", sk = S.view === "skills";
-  const lib = S.view === "library" || auto || conn || proj || pers || sk || plug || cr; // full-page views without a composer dock
+  const lib = S.view === "library" || auto || conn || proj || pers || sk || plug || cr || pcv; // full-page views without a composer dock
+  $("#computers").classList.toggle("hidden", !pcv);
+  $("#nav-pc").classList.toggle("active", pcv);
   $("#creations").classList.toggle("hidden", !cr);
   $("#nav-create").classList.toggle("active", cr);
   $("#plugins").classList.toggle("hidden", !plug);
@@ -281,9 +284,12 @@ function renderAll() {
   $("#dock").classList.toggle("hidden", home || lib);
   $("#nav-library").classList.toggle("active", S.view === "library");
   (proj ? $("#proj-slot") : home || lib ? $("#home-slot") : $("#dock-slot")).appendChild($("#composer"));
-  $("#composer").classList.toggle("hidden", pers || sk || plug || conn || cr);
-  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : sk ? "技能" : plug ? "插件" : cr ? "创作" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
+  $("#composer").classList.toggle("hidden", pers || sk || plug || conn || cr || pcv);
+  const title = proj ? (S.projects.find((p) => p.id === S.projectId)?.name || "项目") : pers ? "个性化" : sk ? "技能" : plug ? "插件" : cr ? "创作" : pcv ? "电脑" : conn ? "连接器" : auto ? "自动化" : lib ? "资料库" : home ? "OpenManus" : (S.title || "新任务");
   $("#session-title").textContent = title;
+  const meta = S.current && S.sessions.find((x) => x.id === S.current);
+  const pcName = meta?.computerId && (S.pcs.computers.find((c) => c.id === meta.computerId)?.name || "云电脑");
+  if (pcName) $("#session-title").insertAdjacentHTML("beforeend", `<span class="lib-tag pc-chip">${icon("monitor")}${esc(pcName)}</span>`);
   renderModeButton();
   document.title = home ? "OpenManus" : `${title} - OpenManus`;
   ["#share-btn", "#delete-btn"].forEach((s) => $(s).classList.toggle("hidden", home || lib));
@@ -292,6 +298,7 @@ function renderAll() {
   if (conn) { renderConnectors(); renderPanel(); return; }
   if (plug) { renderPlugins(); renderPanel(); return; }
   if (cr) { renderCreations(); renderPanel(); return; }
+  if (pcv) { renderComputers(); renderPanel(); return; }
   if (proj) { renderProject(); renderPanel(); return; }
   if (pers) { renderPersonal(); renderPanel(); return; }
   if (sk) { renderSkills(); renderPanel(); return; }
@@ -861,6 +868,107 @@ async function connAction(a, id) {
   if (a === "restart") { c.status = "connecting"; renderConnectors(); await fetch(`/api/connectors/${id}/restart`, { method: "POST" }); }
   loadConns();
 }
+
+// ------------------------------------------------------------------ cloud computers (电脑) ---
+const PC_ST = { running: ["ok", "运行中"], ready: ["ok", "运行中"], stopped: ["", "已关机"], starting: ["", "启动中"], setting_up: ["", "正在配置"], error: ["err", "出错"] };
+async function openComputers() {
+  if (S.current) send({ type: "leave_session", sessionId: S.current });
+  S.current = null; resetSession(); S.view = "computers";
+  history.replaceState(null, "", "#computers");
+  renderSessions(); await loadComputers();
+}
+async function loadComputers() { try { S.pcs = await (await fetch("/api/computers")).json(); } catch { /* keep */ } scheduleRender(); if (S.pcOpen) renderPcView(); }
+setInterval(() => { if ((S.view === "computers" || S.pcOpen) && S.pcs.computers.some((c) => ["starting", "setting_up"].includes(c.status))) loadComputers(); }, 3000);
+const pcSt = (c) => { const [cls, l] = PC_ST[c.status] || ["", c.status]; return `<span class="conn-st ${cls}"><i></i>${l}</span>`; };
+function renderComputers() {
+  const { computers, templates, unavailable, tasks } = S.pcs;
+  $("#pc-mine").innerHTML = computers.length ? `<div class="nav-section" style="padding-left:0">我的电脑</div><div class="sk-grid">${computers.map((c) =>
+    `<div class="sk-card" data-pc="${esc(c.id)}"><div class="sk-top"><span class="auto-ico">${icon("monitor")}</span><div class="sk-title">${esc(c.name)}<div class="sk-name">Linux · ${c.cpus} CPU · ${c.memory} GB${c.autoStop ? ` · 空闲 ${c.autoStop} 分钟关机` : " · 始终在线"}</div></div>${pcSt(c)}</div>` +
+    `<div class="sk-meta"><span>${(tasks[c.id] || []).length} 个任务</span>${c.ports.length ? `<span>${c.ports.length} 个开放端口</span>` : ""}<span class="spacer"></span><button class="btn ghost sm" data-pc-task="${esc(c.id)}">${icon("newTask")}新任务</button></div></div>`).join("")}</div>` : "";
+  $("#pc-templates").innerHTML = templates.map((t) => `<div class="sk-card" data-pc-tpl="${esc(t.id)}"><div class="sk-top"><span class="auto-ico">${icon(t.id === "custom" ? "pencil" : t.id === "gameserver" ? "gamepad" : t.id === "blender" ? "layers" : "monitor")}</span><div class="sk-title">${esc(t.name)}<div class="sk-name">${esc(t.os)}${t.tags.map((x) => ` · ${esc(x)}`).join("")}</div></div></div><div class="sk-desc">${esc(t.description)}</div></div>`).join("") +
+    unavailable.map((t) => `<div class="sk-card off" title="暂不支持"><div class="sk-top"><span class="auto-ico">${icon("monitor")}</span><div class="sk-title">${esc(t.name)}<div class="sk-name">${esc(t.os)}${t.tags.map((x) => ` · ${esc(x)}`).join("")}</div></div><span class="lib-tag">暂不支持</span></div><div class="sk-desc">${esc(t.description)}</div></div>`).join("");
+}
+function openPcNew(tpl = "custom") {
+  const f = $("#pcnew-form"); f.reset(); $("#pcnew-err").textContent = "";
+  $("#pcnew-template").innerHTML = S.pcs.templates.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
+  $("#pcnew-cpus").innerHTML = S.pcs.cpus.map((n) => `<option value="${n}">${n} 核</option>`).join("");
+  $("#pcnew-mem").innerHTML = S.pcs.memory.map((n) => `<option value="${n}">${n} GB</option>`).join("");
+  f.template.value = tpl; syncPcNew();
+  $("#pcnew-modal").classList.remove("hidden");
+}
+function syncPcNew() {
+  const f = $("#pcnew-form"), t = S.pcs.templates.find((x) => x.id === f.template.value); if (!t) return;
+  f.cpus.value = t.cpus; f.memory.value = t.memory; f.autoStop.value = String(t.autoStop || 0); f.name.placeholder = t.name;
+  $("#pcnew-desc").textContent = t.description + (t.setup ? " 创建后会自动安装所需软件，需要几分钟。" : "");
+}
+async function savePcNew(e) {
+  e.preventDefault();
+  const f = e.target;
+  const r = await fetch("/api/computers", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template: f.template.value, name: f.name.value, cpus: +f.cpus.value, memory: +f.memory.value, autoStop: +f.autoStop.value }) });
+  if (!r.ok) { $("#pcnew-err").textContent = (await r.json().catch(() => ({}))).detail || "创建失败"; return; }
+  $("#pcnew-modal").classList.add("hidden");
+  await loadComputers();
+}
+let pcRfb = null;
+function pcVncClose() { if (pcRfb) { try { pcRfb.disconnect(); } catch { /* closed */ } pcRfb = null; } }
+async function openPcView(id, tab) {
+  S.pcOpen = id; if (tab) S.pcTab = tab;
+  $("#pcview-modal").classList.remove("hidden");
+  await loadComputers();
+}
+function closePcView() { S.pcOpen = null; pcVncClose(); $("#pcview-modal").classList.add("hidden"); }
+function renderPcView() {
+  const c = S.pcs.computers.find((x) => x.id === S.pcOpen); if (!c) return closePcView();
+  const on = ["running", "ready"].includes(c.status);
+  $("#pcv-name").innerHTML = `${esc(c.name)} ${pcSt(c)}`;
+  $("#pcv-sub").textContent = `Linux · ${c.cpus} CPU · ${c.memory} GB · 创建于 ${fmtDate(c.createdAt)}`;
+  $("#pcv-power").innerHTML = on ? `${icon("stop")}关机` : `${icon("play2")}开机`;
+  $("#pcv-power").dataset.op = on ? "stop" : "start";
+  $("#pcv-power").disabled = ["starting", "setting_up"].includes(c.status);
+  $("#pcv-tabs").innerHTML = [["desktop", "桌面"], ["console", "终端"], ["ports", "端口"], ["tasks", "任务"], ["settings", "设置"]].map(([k, l]) => `<button class="lib-tab ${S.pcTab === k ? "on" : ""}" data-pcv-tab="${k}">${l}</button>`).join("");
+  const body = $("#pcv-body"), tasks = (S.pcs.tasks[c.id] || []).map((id) => S.sessions.find((x) => x.id === id)).filter(Boolean);
+  if (S.pcTab !== "desktop") pcVncClose();
+  if (S.pcTab === "desktop") {
+    if (!on) { body.innerHTML = `<div class="pc-empty" style="height:420px">${icon("monitor")}<span>${c.status === "setting_up" ? "正在安装模板所需的软件…" : c.status === "starting" ? "正在开机…" : "电脑已关机，点击右上角「开机」"}</span></div>`; return; }
+    if (!pcRfb) {
+      body.innerHTML = `<div class="pcv-screen" id="pcv-screen"></div><div class="muted" style="font-size:12px;padding:6px 2px">可以直接操作这台电脑的桌面；Agent 在这台电脑上运行任务时，画面也会显示在这里。</div>`;
+      (async () => {
+        try { RFB = RFB || (await import(NOVNC)).default; } catch { body.innerHTML = `<div class="pc-empty">无法加载远程桌面组件</div>`; return; }
+        if (S.pcOpen !== c.id || S.pcTab !== "desktop") return;
+        pcRfb = new RFB($("#pcv-screen"), `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/computers/${c.id}/vnc`, { wsProtocols: ["binary"] });
+        pcRfb.scaleViewport = true; pcRfb.background = "transparent";
+        pcRfb.addEventListener("disconnect", () => { pcRfb = null; if (S.pcOpen === c.id && S.pcTab === "desktop") $("#pcv-screen") && ($("#pcv-screen").innerHTML = `<div class="pc-empty" style="height:400px">桌面连接已断开</div>`); });
+      })();
+    }
+    return;
+  }
+  if (S.pcTab === "console") {
+    if (!$("#pcv-out")) body.innerHTML = `<div class="term pcv-term" id="pcv-out">${c.setupLog ? esc(c.setupLog) + "\n" : ""}</div><form id="pcv-cmd-form" class="pcv-cmd"><span>$</span><input id="pcv-cmd" placeholder="${on ? "输入命令，回车执行" : "电脑已关机"}" ${on ? "" : "disabled"} autocomplete="off" /></form>`;
+    return;
+  }
+  if (S.pcTab === "ports") {
+    body.innerHTML = `<p class="auto-intro" style="margin:4px 0 12px">开放端口后，这台电脑上监听该端口的服务会获得一个固定地址，任何拿到链接的人都能访问。</p>` +
+      (c.ports.length ? c.ports.map((p, i) => `<div class="hook-url"><span class="lib-tag">${p.port}</span><code>${esc(p.url)}</code><a class="btn ghost sm" href="${esc(p.url)}" target="_blank">${icon("external")}打开</a><button class="icon-btn sm" data-pcv-rmport="${i}" title="关闭端口">${icon("x")}</button></div>`).join("") : `<div class="muted">还没有开放端口</div>`) +
+      `<form class="pcv-cmd" id="pcv-port-form" style="margin-top:14px"><input id="pcv-port" type="number" min="1" max="65535" placeholder="端口号，例如 3000" /><button class="btn primary sm">开放端口</button></form><div class="sched-err" id="pcv-port-err"></div>`;
+    return;
+  }
+  if (S.pcTab === "tasks") {
+    body.innerHTML = `<div style="margin:4px 0 12px"><button class="btn primary sm" data-pc-task="${esc(c.id)}">${icon("newTask")}在这台电脑上新建任务</button></div>` +
+      (tasks.length ? tasks.map((x) => `<div class="session-item" data-goto="${esc(x.id)}"><span class="s-ico">${icon("message")}</span><span class="s-title">${esc(x.title)}</span></div>`).join("") : `<div class="muted">还没有任务</div>`);
+    return;
+  }
+  body.innerHTML = `<form id="pcv-settings" class="sched-body" style="padding:4px 0"><label>名称<input name="name" value="${esc(c.name)}" /></label>` +
+    `<label>空闲时自动关机<select name="autoStop">${[[0, "从不（始终在线）"], [30, "空闲 30 分钟后"], [60, "空闲 1 小时后"], [120, "空闲 2 小时后"]].map(([v, l]) => `<option value="${v}" ${c.autoStop === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>` +
+    `<div class="cc-actions" style="padding:0"><button type="button" class="btn ghost danger" id="pcv-del">${icon("trash")}删除这台电脑</button><span class="spacer"></span><button class="btn primary">保存</button></div></form>`;
+}
+async function pcCall(op) {
+  const c = S.pcs.computers.find((x) => x.id === S.pcOpen); if (!c) return;
+  const r = await fetch(`/api/computers/${c.id}/${op}`, { method: "POST" });
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "操作失败");
+  pcVncClose(); await loadComputers();
+}
+function newTaskOn(id) { closePcView(); goHome(); S.target = id; renderAttachments(); $("#input").focus(); }
 
 // ------------------------------------------------------------------ creations (创作) ---
 const CR_KINDS = { website: ["网站", "globe"], game: ["游戏", "gamepad"], app: ["移动应用", "phone"] };
@@ -1594,7 +1702,8 @@ function goHome() { openSession(null); $("#input").focus(); }
 async function ensureSession() {
   if (S.current) return S.current;
   const projectId = S.view === "project" ? S.projectId : null; // a task started from a project page joins it
-  const s = await (await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) })).json();
+  const s = await (await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, computerId: S.target }) })).json();
+  S.target = null;
   S.sessions.unshift(s);
   openSession(s.id);
   return s.id;
@@ -1616,7 +1725,8 @@ async function submit(text) {
 }
 function autoGrow() { const i = $("#input"); i.style.height = "auto"; i.style.height = Math.min(i.scrollHeight, 240) + "px"; }
 function renderAttachments() {
-  $("#attach-list").innerHTML = S.pickedSkills.map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span><button type="button" data-rmskill="${esc(n)}">${icon("x")}</button></span>`).join("") + S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
+  const pc = S.target && S.pcs.computers.find((c) => c.id === S.target);
+  $("#attach-list").innerHTML = (pc ? `<span class="chip-file target">${icon("monitor")}<span>在「${esc(pc.name)}」上运行</span><button type="button" data-rmtarget="1">${icon("x")}</button></span>` : "") + S.pickedSkills.map((n) => `<span class="chip-file skill">${icon("spark")}<span>${esc(skillTitle(n))}</span><button type="button" data-rmskill="${esc(n)}">${icon("x")}</button></span>`).join("") + S.attachments.map((a, i) => `<span class="chip-file">${icon("paperclip")}<span>${esc(a.name)}</span><button type="button" data-rm="${i}">${icon("x")}</button></span>`).join("");
 }
 
 // ------------------------------------------------------------------ theme ---
@@ -1633,12 +1743,22 @@ function bind() {
   $("#input").addEventListener("input", () => { autoGrow(); renderComposerState(); });
   $("#input").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if ($("#input").value.trim()) submit($("#input").value); } };
   $("#attach-list").onclick = (e) => {
+    if (e.target.closest("[data-rmtarget]")) { S.target = null; renderAttachments(); return; }
     const k = e.target.closest("[data-rmskill]"); if (k) { S.pickedSkills = S.pickedSkills.filter((n) => n !== k.dataset.rmskill); renderAttachments(); return; }
     const b = e.target.closest("[data-rm]"); if (b) { S.attachments.splice(+b.dataset.rm, 1); renderAttachments(); }
   };
   $("#plus-btn").onclick = (e) => { e.stopPropagation(); $("#plus-menu").classList.toggle("hidden"); $("#skill-pick").classList.add("hidden"); };
   $("#plus-skills").onclick = async (e) => { e.stopPropagation(); await loadSkills(); renderSkillPick(); $("#skill-pick").classList.toggle("hidden"); };
   $("#plus-menu").onclick = (e) => e.stopPropagation();
+  $("#plus-target").onclick = async (e) => {
+    e.stopPropagation(); await loadComputers();
+    $("#target-pick").innerHTML = `<label class="mode-item"><input type="radio" name="tgt" value="" ${S.target ? "" : "checked"} /><span class="grow">云沙箱<span class="muted"> 每个任务独立</span></span></label>` +
+      S.pcs.computers.map((c) => `<label class="mode-item"><input type="radio" name="tgt" value="${esc(c.id)}" ${S.target === c.id ? "checked" : ""} /><span class="grow">${esc(c.name)}<span class="muted"> ${esc((PC_ST[c.status] || [, ""])[1])}</span></span></label>`).join("") +
+      `<button type="button" class="mode-item muted" id="tgt-manage">${icon("plus")}创建云电脑</button>`;
+    $("#target-pick").classList.toggle("hidden");
+  };
+  $("#target-pick").onchange = (e) => { if (e.target.name === "tgt") { S.target = e.target.value || null; renderAttachments(); } };
+  $("#target-pick").onclick = (e) => { if (e.target.closest("#tgt-manage")) { $("#plus-menu").classList.add("hidden"); openComputers(); } };
   $("#skill-pick").onchange = (e) => { const n = e.target.dataset.pick; if (!n) return; S.pickedSkills = e.target.checked ? [...S.pickedSkills, n] : S.pickedSkills.filter((x) => x !== n); renderAttachments(); };
   $("#skill-pick").onclick = (e) => { if (e.target.closest("#pick-manage")) { $("#plus-menu").classList.add("hidden"); openSkills("mine"); } };
   document.addEventListener("click", () => $("#plus-menu").classList.add("hidden"));
@@ -1661,6 +1781,46 @@ function bind() {
   });
   $("#nav-conn").onclick = openPlugins;
   $("#nav-create").onclick = openCreations;
+  $("#nav-pc").onclick = openComputers;
+  $("#pc-new").onclick = () => openPcNew();
+  $("#pc-templates").onclick = (e) => { const t = e.target.closest("[data-pc-tpl]"); if (t) openPcNew(t.dataset.pcTpl); };
+  $("#pc-mine").onclick = (e) => { const t = e.target.closest("[data-pc-task]"); if (t) { e.stopPropagation(); return newTaskOn(t.dataset.pcTask); } const c = e.target.closest("[data-pc]"); if (c) openPcView(c.dataset.pc, "desktop"); };
+  $("#pcnew-form").onsubmit = savePcNew;
+  $("#pcnew-form").template.onchange = syncPcNew;
+  $("#pcnew-close").onclick = $("#pcnew-cancel").onclick = () => $("#pcnew-modal").classList.add("hidden");
+  $("#pcv-close").onclick = closePcView;
+  $("#pcv-power").onclick = (e) => pcCall(e.currentTarget.dataset.op);
+  $("#pcv-tabs").onclick = (e) => { const b = e.target.closest("[data-pcv-tab]"); if (b) { S.pcTab = b.dataset.pcvTab; $("#pcv-body").innerHTML = ""; renderPcView(); } };
+  $("#pcv-body").addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-pc-task]"); if (t) return newTaskOn(t.dataset.pcTask);
+    const g = e.target.closest("[data-goto]"); if (g) { closePcView(); openSession(g.dataset.goto); return; }
+    const c = S.pcs.computers.find((x) => x.id === S.pcOpen);
+    const rm = e.target.closest("[data-pcv-rmport]");
+    if (rm && c) { const ports = c.ports.filter((_, i) => i !== +rm.dataset.pcvRmport); await fetch(`/api/computers/${c.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ports }) }); loadComputers(); }
+    if (e.target.closest("#pcv-del") && c && confirm(`删除「${c.name}」？电脑上的所有文件都会被清除，相关任务会保留。`)) { await fetch(`/api/computers/${c.id}`, { method: "DELETE" }); closePcView(); loadComputers(); }
+  });
+  $("#pcv-body").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const c = S.pcs.computers.find((x) => x.id === S.pcOpen); if (!c) return;
+    if (e.target.id === "pcv-cmd-form") {
+      const inp = $("#pcv-cmd"), cmd = inp.value.trim(); if (!cmd) return; inp.value = ""; inp.disabled = true;
+      const out = $("#pcv-out");
+      const r = await fetch(`/api/computers/${c.id}/exec`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: cmd }) });
+      const j = await r.json().catch(() => ({}));
+      out.insertAdjacentHTML("beforeend", esc(r.ok ? j.output : `错误：${j.detail}`) + "\n"); out.scrollTop = out.scrollHeight;
+      inp.disabled = false; inp.focus();
+    }
+    if (e.target.id === "pcv-port-form") {
+      const port = +$("#pcv-port").value; if (!port) return;
+      const r = await fetch(`/api/computers/${c.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ports: [...c.ports.map(({ port, label }) => ({ port, label })), { port }] }) });
+      if (!r.ok) { $("#pcv-port-err").textContent = (await r.json().catch(() => ({}))).detail || "开放失败"; return; }
+      loadComputers();
+    }
+    if (e.target.id === "pcv-settings") {
+      await fetch(`/api/computers/${c.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: e.target.name.value, autoStop: +e.target.autoStop.value }) });
+      loadComputers();
+    }
+  });
   $("#cr-tabs").onclick = (e) => { const b = e.target.closest("[data-crtab]"); if (b) { S.crTab = b.dataset.crtab; renderCreations(); } };
   $("#cr-list").onclick = (e) => {
     const g = e.target.closest("[data-goto]"); if (g) { e.preventDefault(); openSession(g.dataset.goto); return; }
@@ -1924,6 +2084,7 @@ async function deleteSession(sid) {
     await loadProjects();
     await loadPersonal(); renderMe();
     await loadSkills();
+    loadComputers();
     $("#config-info").textContent = `${shortModel(S.cfg.model)} · ${S.cfg.sandbox} 沙箱`;
   } catch { /* backend not reachable yet */ }
   await refreshSessions();
@@ -1934,6 +2095,7 @@ async function deleteSession(sid) {
   else if (sid === "connectors") openConnectors();
   else if (sid === "plugins") openPlugins();
   else if (sid === "creations") openCreations();
+  else if (sid === "computers") openComputers();
   else if (sid === "personal") openPersonal();
   else if (sid === "skills") openSkills();
   else if (sid.startsWith("project/")) openProject(sid.slice(8));
@@ -1943,7 +2105,7 @@ async function deleteSession(sid) {
   window.addEventListener("hashchange", () => {
     const h = location.hash.slice(1);
     if (S.readonly || h === (S.current || "") || (h === S.view && !S.current)) return;
-    if (h === "library") openLibrary(); else if (h === "automations") openAutomations(); else if (h === "connectors") openConnectors(); else if (h === "plugins") openPlugins(); else if (h === "creations") openCreations();
+    if (h === "library") openLibrary(); else if (h === "automations") openAutomations(); else if (h === "connectors") openConnectors(); else if (h === "plugins") openPlugins(); else if (h === "creations") openCreations(); else if (h === "computers") openComputers();
     else if (h === "personal") openPersonal(); else if (h === "skills") openSkills();
     else if (h.startsWith("project/")) openProject(h.slice(8));
     else if (!h || S.sessions.some((s) => s.id === h)) openSession(h || null);

@@ -42,6 +42,7 @@ class Session(AgentHost):
         self.files: dict[str, dict] = {}  # sandbox path -> stored copy (survives the sandbox)
         self.schedule_id: str | None = None  # set when a scheduled task started this session
         self.trigger_id: str | None = None  # set when a trigger (webhook / condition) started this session
+        self.computer_id: str | None = None  # runs on this cloud computer instead of its own sandbox
         self.project_id: str | None = None  # project this task belongs to (instructions + files)
         self.project_announced = False
         self.share: dict | None = None  # {token, createdAt}: public read-only replay link
@@ -58,11 +59,16 @@ class Session(AgentHost):
         (self.dir / "files").mkdir(exist_ok=True)
         self.env_announced = False
 
+    @property
+    def sandbox_id(self) -> str:
+        """The sandbox this task acts in: its own, or the cloud computer it was started on."""
+        return f"pc-{self.computer_id}" if self.computer_id else self.session_id
+
     # ------------------------------------------------------- persistence ---
 
     def meta(self) -> dict:
         return {"id": self.session_id, "title": self.title, "createdAt": self.created_at,
-                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id, "triggerId": self.trigger_id,
+                "status": self.status, "plan": self.plan, "scheduleId": self.schedule_id, "triggerId": self.trigger_id, "computerId": self.computer_id,
                 "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id}
 
     def persist(self) -> None:
@@ -82,6 +88,7 @@ class Session(AgentHost):
         s.files = meta.get("files", {})
         s.schedule_id = meta.get("scheduleId")
         s.trigger_id = meta.get("triggerId")
+        s.computer_id = meta.get("computerId")
         s.model_selection = meta.get("model") or {}
         s.share = meta.get("share")
         s.project_id = meta.get("projectId")
@@ -180,7 +187,7 @@ class Session(AgentHost):
 
     async def keep_file(self, path: str, kind: str) -> None:
         from .sandbox import SandboxError
-        sb = manager.sandboxes.get(self.session_id)
+        sb = manager.sandboxes.get(self.sandbox_id)
         if not sb:
             return
         if not path.startswith("/"):
@@ -221,6 +228,10 @@ class Session(AgentHost):
 
     def propose_knowledge(self, title: str, content: str) -> dict:
         return personal.store.add(title, content, source="agent", session_id=self.session_id, pending=True)
+
+    def _computer(self) -> dict | None:
+        from . import computers
+        return computers.store.items.get(self.computer_id) if computers.store else None
 
     def skill_used(self, name: str) -> None:
         if skills.store:
@@ -297,8 +308,8 @@ class Session(AgentHost):
     async def _run(self, text: str) -> None:
         try:
             await self.emit({"type": "statusUpdate", "agentStatus": "running"})
-            sandbox = await manager.get(self.session_id)
-            await self.emit({"type": "sandboxUpdate", "sandboxId": self.session_id, "status": "running",
+            sandbox = await manager.get(self.sandbox_id)
+            await self.emit({"type": "sandboxUpdate", "sandboxId": self.sandbox_id, "status": "running",
                              "mode": sandbox.mode, "vnc": sandbox.vnc, "screen": sandbox.info.get("screen")})
             await skills.store.install(sandbox, self.picked_skills)
             profile = providers.resolve(self.model_selection)
@@ -313,6 +324,11 @@ class Session(AgentHost):
                     f"<environment>\nSandbox OS: Linux ({sandbox.mode} sandbox)\nWorking directory: {sandbox.workdir}\n"
                     f"User uploads: {sandbox.workdir}/upload\nCurrent date: {time.strftime('%Y-%m-%d %H:%M')} "
                     f"({config.UTC_LABEL}, the user's local time; schedules use it too)\n</environment>")
+                if self.computer_id and (pc := self._computer()):
+                    system_notes[-1] = system_notes[-1].replace("</environment>",
+                        f"This is the user's persistent cloud computer \"{pc['name']}\" ({pc['cpus']} CPU, {pc['memory']} GB): files, "
+                        "installed software and running services stay after this task and are shared with other tasks on it. "
+                        "Look around before assuming a clean machine; leave long-running services running if they are the point.\n</environment>")
                 self.env_announced = True
             if self.project_id and projects.store and self.project_id in projects.store.items and not self.project_announced:
                 paths = await projects.store.install(self.project_id, sandbox)

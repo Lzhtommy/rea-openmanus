@@ -665,3 +665,17 @@ textarea.code-edit { font: 13px/20px var(--font-mono); min-height: 52vh; }
 .cr-url a { color: var(--text-blue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .cr-card .auto-foot { margin-top: 4px; }
 .cr-ver { font-size: 12px; border: 1px solid var(--border-main); border-radius: 6px; background: var(--bg-white); color: var(--text-secondary); padding: 2px 4px; }
+
+/* ---- cloud computers (电脑) */
+#computers { flex: 1; min-height: 0; overflow-y: auto; }
+#pcnew-modal, #pcview-modal { position: fixed; inset: 0; z-index: 50; background: var(--shadow-l); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.pcview-card { width: min(1000px, 100%); max-height: 94vh; display: flex; flex-direction: column; }
+.pcview-card .viewer-head { gap: 10px; }
+#pcv-name { display: flex; align-items: center; gap: 4px; }
+.pcv-body { padding: 12px 18px 18px; overflow: auto; min-height: 440px; }
+.pcv-screen { height: 540px; background: #111; border-radius: 10px; overflow: hidden; }
+.pcv-term { height: 380px; overflow: auto; border-radius: 10px; }
+.pcv-cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-family: var(--font-mono); }
+.pcv-cmd input { flex: 1; font: 13px/20px var(--font-mono); padding: 8px 10px; border: 1px solid var(--border-dark); border-radius: 8px; background: var(--bg-white); color: var(--text-primary); outline: none; }
+.chip-file.target { background: var(--fill-light); }
+.pc-chip { margin-left: 8px; display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; } .pc-chip svg.i { width: 11px; height: 11px; }

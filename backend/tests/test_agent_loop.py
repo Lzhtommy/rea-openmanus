@@ -842,3 +842,35 @@ async def test_publish_site(store, monkeypatch, tmp_path):
     assert pathlib.Path(main._serve_site(site["slug"], "some/route", sandboxed=False).path).name == "index.html"  # SPA
     sites.store.update(site["id"], {"current": 1})
     assert b"v1" in pathlib.Path(main._serve_site(site["slug"], "index.html", sandboxed=False).path).read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_cloud_computer(store, monkeypatch, tmp_path):
+    """Tasks on a computer share its sandbox; the idle reaper leaves it running unless auto-stop is set."""
+    from app import computers, main
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    computers.store = computers.Computers()
+    c = computers.store.create({"template": "custom", "name": "我的服务器", "cpus": 2, "memory": 4})
+    await computers.store.tasks[c["id"]]
+    assert computers.store.view(computers.store.items[c["id"]])["status"] == "running"
+    model = ScriptedModel([msg(tool("file_write", file="notes.txt", content="from task 1")), msg(tool("idle")),
+                           msg(tool("file_read", file="notes.txt")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    a = store.get((await main.create_session({"computerId": c["id"]}))["id"])
+    await a.user_message("写个文件", [])
+    await wait_status(a, {"idle"})
+    b = store.get((await main.create_session({"computerId": c["id"]}))["id"])
+    await b.user_message("读那个文件", [])
+    await wait_status(b, {"idle"})
+    read = next(e for e in b.events if e.get("name") == "file_read" and e["status"] == "success")
+    assert "from task 1" in read["detail"]["textEditor"]["content"]
+    assert "persistent cloud computer" in next(m["content"] for m in b.messages if m["role"] == "system")
+    sbid = computers.sandbox_id(c["id"])
+    assert sbid not in await manager.reap(idle_seconds=None) and sbid in manager.sandboxes  # never auto-stopped
+    out = await computers.store.exec(c["id"], "echo hi from console")
+    assert "hi from console" in out["output"]
+    with pytest.raises(computers.ComputerError):
+        computers.store.update(c["id"], {"ports": [{"port": 8080}]})
+    assert computers.store.update(c["id"], {"ports": [{"port": 3000}]})["ports"][0]["url"].startswith(f"http://pc-{c['id']}-3000.")
+    await main.delete_computer(c["id"])
+    assert sbid not in manager.sandboxes and a.computer_id is None

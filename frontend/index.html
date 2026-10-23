@@ -21,10 +21,11 @@
       </div>
       <div class="nav-body">
         <button class="nav-item" id="new-task"><span class="nav-ico" data-icon="newTask"></span><span class="nav-label">新建任务</span><kbd>⌘K</kbd></button>
-        <button class="nav-item" id="nav-auto"><span class="nav-ico" data-icon="clock"></span><span class="nav-label">自动化</span></button>
-        <button class="nav-item" id="nav-conn"><span class="nav-ico" data-icon="puzzle"></span><span class="nav-label">插件</span></button>
+        <button class="nav-item" id="nav-pc"><span class="nav-ico" data-icon="monitor"></span><span class="nav-label">电脑</span></button>
         <button class="nav-item" id="nav-library"><span class="nav-ico" data-icon="library"></span><span class="nav-label">资料库</span></button>
         <button class="nav-item" id="nav-create"><span class="nav-ico" data-icon="sparkBox"></span><span class="nav-label">创作</span></button>
+        <button class="nav-item" id="nav-auto"><span class="nav-ico" data-icon="clock"></span><span class="nav-label">自动化</span></button>
+        <button class="nav-item" id="nav-conn"><span class="nav-ico" data-icon="puzzle"></span><span class="nav-label">插件</span></button>
         <div class="more-wrap"><button class="nav-item" id="nav-more"><span class="nav-ico" data-icon="more"></span><span class="nav-label">更多</span></button>
           <div class="more-menu hidden" id="more-menu">
             <button class="mode-item" data-goto-view="skills"><span data-icon="spark"></span>技能</button>
@@ -96,6 +97,15 @@
           </form>
           <div class="lib-tabs" id="auto-tabs"></div>
           <div id="auto-list"></div>
+        </div>
+      </div>
+
+      <div id="computers" class="hidden">
+        <div class="lib-inner wide">
+          <div class="lib-head"><h2>电脑</h2><button class="btn primary" id="pc-new">创建云电脑</button></div>
+          <div id="pc-mine"></div>
+          <div class="nav-section" style="padding-left:0">创建云电脑 · 为你找到合适的配置</div>
+          <div id="pc-templates" class="sk-grid"></div>
         </div>
       </div>
 
@@ -197,6 +207,8 @@
               <label class="mode-item"><span data-icon="paperclip"></span>添加文件<input id="file-input" type="file" multiple hidden /></label>
               <button type="button" class="mode-item" id="plus-skills"><span data-icon="spark"></span>使用技能<span class="spacer"></span><span data-icon="chevRight"></span></button>
               <div class="skill-pick hidden" id="skill-pick"></div>
+              <button type="button" class="mode-item" id="plus-target"><span data-icon="monitor"></span>运行位置<span class="spacer"></span><span data-icon="chevRight"></span></button>
+              <div class="skill-pick hidden" id="target-pick"></div>
             </div></div>
           <span class="spacer"></span>
           <button type="submit" class="send-btn" id="send-btn" title="发送" disabled data-icon="arrowUp"></button>
@@ -270,6 +282,30 @@
       <div class="sched-err" id="flex-err"></div>
       <div class="flex-actions"><button type="button" class="btn ghost" id="flex-remove">移除</button><span class="spacer"></span><button type="button" class="btn ghost" id="flex-cancel">取消</button><button type="submit" class="btn primary" id="flex-connect">连接</button></div>
     </form>
+  </div>
+
+  <div id="pcnew-modal" class="hidden">
+    <form class="sched-card" id="pcnew-form" autocomplete="off">
+      <div class="viewer-head"><div class="viewer-title"><div style="font-size:16px;font-weight:500">创建云电脑</div></div><button type="button" class="icon-btn" id="pcnew-close" data-icon="x"></button></div>
+      <div class="sched-body">
+        <label>模板<select name="template" id="pcnew-template"></select></label>
+        <div class="muted" id="pcnew-desc" style="font-size:12px;margin-top:-6px"></div>
+        <label>名称<input name="name" placeholder="例如：数据服务器" /></label>
+        <div class="sched-row"><label>CPU<select name="cpus" id="pcnew-cpus"></select></label><label>内存<select name="memory" id="pcnew-mem"></select></label></div>
+        <label>空闲时自动关机<select name="autoStop"><option value="0">从不（始终在线）</option><option value="30">空闲 30 分钟后</option><option value="60">空闲 1 小时后</option><option value="120">空闲 2 小时后</option></select></label>
+        <div class="sched-err" id="pcnew-err"></div>
+      </div>
+      <div class="cc-actions"><button type="button" class="btn ghost" id="pcnew-cancel">取消</button><button type="submit" class="btn primary">创建</button></div>
+    </form>
+  </div>
+
+  <div id="pcview-modal" class="hidden">
+    <div class="sched-card pcview-card">
+      <div class="viewer-head"><span class="auto-ico" data-icon="monitor"></span><div class="viewer-title"><div id="pcv-name" style="font-size:16px;font-weight:500"></div><div id="pcv-sub" class="muted" style="font-size:12px"></div></div>
+        <button class="btn ghost sm" id="pcv-power"></button><button type="button" class="icon-btn" id="pcv-close" data-icon="x"></button></div>
+      <div class="lib-tabs" id="pcv-tabs" style="padding:10px 18px 0"></div>
+      <div class="pcv-body" id="pcv-body"></div>
+    </div>
   </div>
 
   <div id="plug-modal" class="hidden">

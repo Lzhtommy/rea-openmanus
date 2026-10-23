@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import logging
 import secrets
 import time
@@ -27,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import config, connectors, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import computers, config, connectors, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -40,17 +41,21 @@ async def lifespan(app: FastAPI):
     personal.store = personal.Personal()
     skills.store = skills.Skills()
     sites.store = sites.Sites()
+    computers.store = computers.Computers()
+    asyncio.create_task(computers.store.resume())
     scheduler_mod.scheduler = scheduler_mod.Scheduler(session_mod.store)
     scheduler_mod.scheduler.start()
     triggers_mod.triggers = triggers_mod.Triggers(session_mod.store)
     triggers_mod.triggers.start()
-    def busy(sid: str) -> bool:
-        s = session_mod.store.get(sid)
-        return bool(s and ((s.task and not s.task.done()) or s.pending_confirms or s.status in ("running", "waiting")))
+    def users(sbid: str) -> list:  # sessions acting in this sandbox (a computer can serve many)
+        return [s for s in session_mod.store.sessions.values() if s.sandbox_id == sbid]
 
-    def stopped(sid: str) -> None:
-        if s := session_mod.store.get(sid):
-            asyncio.create_task(s.emit({"type": "sandboxUpdate", "sandboxId": sid, "status": "stopped", "vnc": False}))
+    def busy(sbid: str) -> bool:
+        return any((s.task and not s.task.done()) or s.pending_confirms or s.status in ("running", "waiting") for s in users(sbid))
+
+    def stopped(sbid: str) -> None:
+        for s in users(sbid):
+            asyncio.create_task(s.emit({"type": "sandboxUpdate", "sandboxId": sbid, "status": "stopped", "vnc": False}))
 
     manager.busy, manager.on_stopped = busy, stopped
     manager.reaper = asyncio.create_task(manager.reap_loop())
@@ -84,6 +89,10 @@ async def list_sessions():
 @app.post("/api/sessions")
 async def create_session(body: dict | None = None):
     s = session_mod.store.create()
+    cid = (body or {}).get("computerId")
+    if cid and computers.store and cid in computers.store.items:
+        s.computer_id = cid
+        s.persist()
     pid = (body or {}).get("projectId")
     if pid and projects.store and pid in projects.store.items:
         s.project_id = pid
@@ -105,7 +114,7 @@ async def delete_session(sid: str):
 
 @app.post("/api/sessions/{sid}/upload")
 async def upload(sid: str, file: UploadFile = File(...)):
-    sb = await manager.get(_session(sid).session_id)
+    sb = await manager.get(_session(sid).sandbox_id)
     r = await sb.http.post("/file/upload", files={"file": (file.filename, await file.read())},
                            data={"dir": f"{sb.workdir}/upload"})
     if r.status_code >= 400:
@@ -126,7 +135,7 @@ async def download(sid: str, path: str):
     """Live from the running sandbox when possible, else the stored copy (the sandbox may be gone)."""
     s = _session(sid)
     name = path.rsplit("/", 1)[-1]
-    sb = manager.sandboxes.get(sid)
+    sb = manager.sandboxes.get(s.sandbox_id)
     if sb:
         try:
             r = await sb.http.get("/file/download", params={"path": path})
@@ -140,7 +149,7 @@ async def download(sid: str, path: str):
         return FileResponse(p, media_type=meta.get("mime"), headers={"Content-Disposition": _disposition(name)})
     if sb:
         raise HTTPException(404, "file not found")
-    sb = await manager.get(sid)  # nothing stored: start the sandbox and try there
+    sb = await manager.get(s.sandbox_id)  # nothing stored: start the sandbox and try there
     r = await sb.http.get("/file/download", params={"path": path})
     if r.status_code >= 400:
         raise HTTPException(r.status_code, "file not found")
@@ -276,7 +285,7 @@ async def skill_from_session(body: dict):
     if not path.endswith("/SKILL.md"):
         raise HTTPException(400, "请选择 SKILL.md 文件")
     try:
-        return await skills.store.from_sandbox(await manager.get(s.session_id), path)
+        return await skills.store.from_sandbox(await manager.get(s.sandbox_id), path)
     except skills.SkillError as e:
         raise HTTPException(400, str(e))
 
@@ -689,6 +698,90 @@ async def automation_activity():
     return sorted(items, key=lambda x: -x["at"])[:200]
 
 
+# ------------------------------------------------------------- cloud computers (电脑) ---
+
+def _computer(cid: str) -> dict:
+    c = computers.store.items.get(cid)
+    if not c:
+        raise HTTPException(404, "computer not found")
+    return c
+
+
+@app.get("/api/computers")
+async def list_computers():
+    return {"computers": computers.store.list(), **computers.store.catalog(),
+            "tasks": {cid: [s.session_id for s in session_mod.store.sessions.values() if s.computer_id == cid]
+                      for cid in computers.store.items}}
+
+
+@app.post("/api/computers")
+async def create_computer(body: dict):
+    try:
+        return computers.store.create(body)
+    except computers.ComputerError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/api/computers/{cid}")
+async def update_computer(cid: str, body: dict):
+    _computer(cid)
+    try:
+        return computers.store.update(cid, body)
+    except (computers.ComputerError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/computers/{cid}/start")
+async def start_computer(cid: str):
+    _computer(cid)
+    return await computers.store.start(cid)
+
+
+@app.post("/api/computers/{cid}/stop")
+async def stop_computer(cid: str):
+    _computer(cid)
+    if any(s.computer_id == cid and s.task and not s.task.done() for s in session_mod.store.sessions.values()):
+        raise HTTPException(409, "这台电脑上还有任务在运行")
+    return await computers.store.stop(cid)
+
+
+@app.delete("/api/computers/{cid}")
+async def delete_computer(cid: str):
+    _computer(cid)
+    for s in session_mod.store.sessions.values():  # tasks stay; they lose the machine
+        if s.computer_id == cid:
+            await s.stop()
+            s.computer_id = None
+            s.persist()
+    await computers.store.delete(cid)
+    return {"ok": True}
+
+
+@app.post("/api/computers/{cid}/exec")
+async def computer_exec(cid: str, body: dict):
+    _computer(cid)
+    from .sandbox import SandboxError
+    try:
+        return await computers.store.exec(cid, str(body.get("command") or ""))
+    except SandboxError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.websocket("/api/computers/{cid}/vnc")
+async def computer_vnc(websocket: WebSocket, cid: str):
+    """The computer's desktop, like a task's live screen."""
+    sb = manager.sandboxes.get(computers.sandbox_id(cid)) if cid in computers.store.items else None
+    await _relay_vnc(websocket, sb)
+
+
+async def _proxy_port(sb, port: int, request: Request) -> Response:
+    url = f"/proxy/{port}{request.url.path}" + (f"?{request.url.query}" if request.url.query else "")
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in {"host", "content-length"}}
+    r = await sb.http.request(request.method, url, headers=headers, content=await request.body())
+    drop = {"content-encoding", "transfer-encoding", "connection", "content-length"}
+    return Response(r.content, status_code=r.status_code, headers={k: v for k, v in r.headers.items() if k.lower() not in drop})
+
+
 # ------------------------------------------------------------- creations (创作: published sites) ---
 
 def _site(sid: str) -> dict:
@@ -749,6 +842,12 @@ async def site_hosts(request: Request, call_next):
     host, domain = request.headers.get("host", ""), sites.sites_domain()
     if host.endswith("." + domain) and sites.store:
         slug = host[: -len(domain) - 1]
+        if m := re.fullmatch(r"pc-([0-9a-f]+)-(\d+)", slug):  # an opened port of a cloud computer
+            c = computers.store.items.get(m.group(1)) if computers.store else None
+            if not c or int(m.group(2)) not in {p["port"] for p in c["ports"]}:
+                return Response("Port not opened", status_code=404, media_type="text/plain")
+            sb = await manager.get(computers.sandbox_id(c["id"]))
+            return await _proxy_port(sb, int(m.group(2)), request)
         if request.method not in ("GET", "HEAD"):
             return Response("Method not allowed", status_code=405)
         return _serve_site(slug, request.url.path, sandboxed=False)
@@ -777,7 +876,7 @@ async def shot(sid: str, name: str):
 @app.api_route("/preview/{sid}/{port}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
 async def preview(sid: str, port: int, path: str, request: Request):
     """Expose a port inside the sandbox (deploy_expose_port) through the sandbox proxy."""
-    sb = await manager.get(_session(sid).session_id)
+    sb = await manager.get(_session(sid).sandbox_id)
     url = f"/proxy/{port}/{path}" + (f"?{request.url.query}" if request.url.query else "")
     headers = {k: v for k, v in request.headers.items() if k.lower() not in {"host", "content-length"}}
     r = await sb.http.request(request.method, url, headers=headers, content=await request.body())
@@ -838,7 +937,10 @@ async def ws(websocket: WebSocket):
 async def vnc(websocket: WebSocket, sid: str):
     """Relay the sandbox's live screen (VNC over WebSocket) to the web client, like Manus' vncUrl."""
     s = session_mod.store.get(sid)
-    sb = manager.sandboxes.get(sid) if s else None
+    await _relay_vnc(websocket, manager.sandboxes.get(s.sandbox_id) if s else None)
+
+
+async def _relay_vnc(websocket: WebSocket, sb) -> None:
     if sb and not sb.vnc:  # x11vnc may come up after the first health check: look again
         with contextlib.suppress(httpx.HTTPError, ValueError):
             sb.info = (await sb.http.get("/health", timeout=3)).json()

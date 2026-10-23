@@ -208,6 +208,7 @@ webdev 全栈托管（自定义域名、Stripe 等）、Connectors 和 MCP 市�
 | `/app/plugins` 插件目录（分类、管理连接器、创建） | `plugins.py`：连接器模板 + 需要填写的字段，安装即生成带 `plugin` 标记的普通连接器；`connectors.mask_url` 隐藏 URL 中的密钥；中文名连接器使用唯一前缀，避免工具限定名冲突 |
 | `slides` / `media_viewer` 工具类别，"创建幻灯片、图片和视频" | `slides` 技能 + `slides_export`（沙箱 `/slides/export`：逐页截图、打印 CSS 生成矢量 PDF、python-pptx 生成 PPTX）；`media.py` 经网关生成图片（images API，带参考图时走 chat 图像输出）、语音（audio.speech）、视频（`/v1/videos` 创建、轮询、下载） |
 | `/app/creations` 创作（网站 / 游戏 / 移动应用）、`webdev` 托管 | `sites.py`：`deploy_publish` 复制构建产物到 `data/sites/<id>/v<n>/`，版本可回滚；按 Host 头 `<slug>.<sites 域名>` 提供独立源的站点（路径形式加 CSP sandbox），SPA 路由回退到 index.html；沙箱 `/web/screenshot` 生成封面 |
+| `/app/computers` 电脑（模板、自定义配置、连接设备）、"在以下电脑上运行此任务" | `computers.py`：电脑即沙箱 `pc-<id>`，`SandboxManager.specs` 指定 CPU、内存与空闲策略（默认不回收）；模板在创建后执行一次安装命令；会话的 `sandbox_id` 指向电脑，同一台电脑上的任务共享文件与服务；开放端口按 Host 头 `pc-<id>-<port>.<域名>` 代理到沙箱；记录开关机意图，后端重启后自动重连 |
 | `ScheduledTask` / 自动化 | `scheduler.py`（once/interval/daily/weekly），`/api/schedules`、`schedule_create` 工具、"自动化"页面 |
 这些都是在同一个 Agent 内核上叠加的业务功能，事件协议里已预留扩展点（`toolUsed.tool` 新增类别即可）。
 

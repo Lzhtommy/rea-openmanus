@@ -101,6 +101,8 @@ class SandboxManager:
         self.on_stopped: Callable[[str], None] = lambda sid: None
         self.started_at = time.monotonic()
         self.reaper: asyncio.Task | None = None
+        # per-sandbox overrides (cloud computers): {"memory": "8g", "cpus": "4", "idle_minutes": 0 = never stop}
+        self.specs: dict[str, dict] = {}
 
     async def get(self, session_id: str) -> Sandbox:
         lock = self.locks.setdefault(session_id, asyncio.Lock())
@@ -124,8 +126,8 @@ class SandboxManager:
             await _run("docker", "run", "-d", "--name", name,
                        "--label", "manus.sandbox=1",
                        "-p", "127.0.0.1::8080",
-                       "--memory", os.environ.get("MANUS_SANDBOX_MEMORY", "4g"),
-                       "--cpus", os.environ.get("MANUS_SANDBOX_CPUS", "2"),
+                       "--memory", self.specs.get(sid, {}).get("memory") or os.environ.get("MANUS_SANDBOX_MEMORY", "4g"),
+                       "--cpus", self.specs.get(sid, {}).get("cpus") or os.environ.get("MANUS_SANDBOX_CPUS", "2"),
                        "--shm-size", "1g",
                        "-e", f"TZ={config.SANDBOX_TZ}",
                        config.SANDBOX_IMAGE)
@@ -160,7 +162,9 @@ class SandboxManager:
             return []
         now, stopped = time.monotonic(), []
         for sid, sb in list(self.sandboxes.items()):
-            if now - sb.last_used < idle or sb.viewers or self.busy(sid):
+            own = self.specs.get(sid, {}).get("idle_minutes")
+            limit = idle if own is None or idle_seconds is not None else own * 60
+            if limit <= 0 or now - sb.last_used < limit or sb.viewers or self.busy(sid):
                 continue
             async with self.locks.setdefault(sid, asyncio.Lock()):
                 if self.sandboxes.get(sid) is not sb:
@@ -175,7 +179,7 @@ class SandboxManager:
                 running = []
             for name in running:
                 sid = name.removeprefix("manus-sbx-")
-                if sid not in self.sandboxes and not self.busy(sid):
+                if sid not in self.sandboxes and sid not in self.specs and not self.busy(sid):  # computers keep running
                     await self.stop(sid)
                     stopped.append(sid)
         return stopped
