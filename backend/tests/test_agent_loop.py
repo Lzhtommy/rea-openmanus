@@ -1077,3 +1077,32 @@ def test_multi_user(monkeypatch, tmp_path):
         with c.websocket_connect("/ws") as ws:  # the socket also refuses other users' tasks
             ws.send_json({"type": "join_session", "sessionId": mine, "lastSeq": -1})
             assert ws.receive_json()["type"] == "error"
+
+
+def test_developer_api_and_export(monkeypatch, tmp_path):
+    """API keys start tasks over /api/v1 and read their result; the data export contains them."""
+    import io
+    import zipfile
+    from fastapi.testclient import TestClient
+    from app import main
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(manager, "sandboxes", {})
+    monkeypatch.setattr(manager, "local_procs", {})
+    model = ScriptedModel([msg(tool("message_notify_user", text="答案是 42", kind="result")), msg(tool("idle"))])
+    monkeypatch.setattr(llm, "agent_step", model)
+    with TestClient(main.app) as c:
+        key = c.post("/api/keys", json={"name": "ci"}).json()["key"]
+        assert c.post("/api/v1/tasks", json={"prompt": "x"}).status_code == 401
+        h = {"Authorization": f"Bearer {key}"}
+        t = c.post("/api/v1/tasks", json={"prompt": "算一下"}, headers=h).json()
+        for _ in range(200):
+            t = c.get(f"/api/v1/tasks/{t['id']}", headers=h).json()
+            if t["status"] == "idle" and t["result"]:
+                break
+            import time as _t
+            _t.sleep(0.05)
+        assert t["result"] == "答案是 42" and c.get("/api/keys").json()[0]["lastUsed"]
+        z = zipfile.ZipFile(io.BytesIO(c.get("/api/data/export").content))
+        assert f"tasks/{t['id']}/meta.json" in z.namelist() and "personalization.json" in z.namelist()
+        assert c.delete("/api/data/tasks").json()["deleted"] == 1 and c.get("/api/sessions").json() == []

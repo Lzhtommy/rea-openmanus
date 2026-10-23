@@ -2010,7 +2010,7 @@ function openIdeas(cat = "全部") {
 }
 
 // ------------------------------------------------------------------ settings (设置) ---
-const SET_TABS = [["account", "账户", "user"], ["members", "成员", "users"], ["general", "通用", "sun"], ["usage", "用量", "chart"], ["shortcuts", "快捷键", "list"], ["personal", "个性化", "user"], ["skills", "技能", "spark"], ["plugins", "插件与连接器", "puzzle"]];
+const SET_TABS = [["account", "账户", "user"], ["members", "成员", "users"], ["general", "通用", "sun"], ["usage", "用量", "chart"], ["shortcuts", "快捷键", "list"], ["data", "数据管理", "folder"], ["developer", "开发者", "code"], ["personal", "个性化", "user"], ["skills", "技能", "spark"], ["plugins", "插件与连接器", "puzzle"]];
 const fmtNum = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n || 0));
 async function openSettings(tab = "account") {
   if (tab === "members" && S.me?.role !== "admin") tab = "account";
@@ -2032,6 +2032,20 @@ async function openSettings(tab = "account") {
     const users = await (await fetch("/api/users")).json();
     body.innerHTML = users.map((u) => `<div class="set-row"><div><b>${esc(u.name)}</b><div class="muted">@${esc(u.username)} · ${u.role === "admin" ? "管理员" : "成员"}${u.feishu ? " · 飞书" : ""}</div></div>${u.id === S.me.id ? '<span class="muted">你</span>' : `<button class="icon-btn sm" data-user-del="${esc(u.id)}" title="删除">${icon("trash")}</button>`}</div>`).join("") +
       `<form class="sched-body" id="set-adduser" style="padding:14px 0"><div class="mcp-label">添加成员</div><div class="sched-row"><label>用户名<input name="username" required /></label><label>名字<input name="name" /></label></div><div class="sched-row"><label>初始密码<input name="password" type="password" minlength="8" required /></label><label>角色<select name="role"><option value="member">成员</option><option value="admin">管理员</option></select></label></div><div class="cc-actions" style="padding:0"><span class="sched-err" id="set-adduser-err"></span><span class="spacer"></span><button class="btn primary sm">添加</button></div></form>`;
+    return;
+  }
+  if (tab === "data") {
+    body.innerHTML = `<div class="set-row"><div><b>导出数据</b><div class="muted">下载你的全部任务（对话、步骤、保存的文件）、项目、自动化、Agent 和个性化设置（zip）</div></div><a class="btn ghost sm" href="/api/data/export">${icon("download")}导出</a></div>` +
+      `<div class="set-row"><div><b>删除所有任务</b><div class="muted">删除你的全部任务及其沙箱和文件，无法恢复。项目、技能和设置会保留。</div></div><button class="btn ghost sm danger" id="set-wipe">${icon("trash")}删除</button></div>`;
+    return;
+  }
+  if (tab === "developer") {
+    const keys = await (await fetch("/api/keys")).json();
+    const origin = location.origin;
+    body.innerHTML = `<div class="muted" style="font-size:13px;margin:6px 0 10px">用 API 密钥从脚本或其他系统创建任务、查询结果。密钥只在创建时显示一次。</div>` +
+      (keys.map((k) => `<div class="set-row"><div><b>${esc(k.name)}</b><div class="muted"><code>${esc(k.prefix)}…</code> · 创建于 ${fmtDate(k.createdAt)}${k.lastUsed ? ` · 最近使用 ${fmtDate(k.lastUsed)}` : " · 从未使用"}</div></div><button class="icon-btn sm" data-key-del="${esc(k.id)}" title="删除">${icon("trash")}</button></div>`).join("") || `<div class="muted">还没有 API 密钥</div>`) +
+      `<form class="pcv-cmd" id="set-newkey" style="margin:14px 0"><input name="name" placeholder="密钥名称，例如：CI 机器人" /><button class="btn primary sm">创建密钥</button></form><div id="set-keyout"></div>` +
+      `<div class="mcp-label">示例</div><pre class="cc-cmd">curl -X POST ${esc(origin)}/api/v1/tasks \\\n  -H "Authorization: Bearer om_..." -H "Content-Type: application/json" \\\n  -d '{"prompt": "调研……并输出报告", "mode": "standard"}'\n\ncurl ${esc(origin)}/api/v1/tasks/&lt;id&gt; -H "Authorization: Bearer om_..."\n# → {status, result, files[], url}\n\ncurl -X POST ${esc(origin)}/api/v1/tasks/&lt;id&gt;/messages -H "Authorization: Bearer om_..." \\\n  -H "Content-Type: application/json" -d '{"content": "继续"}'</pre>`;
     return;
   }
   if (tab === "general") {
@@ -2342,11 +2356,15 @@ function bind() {
     const call = async (url, body, method = "POST") => { const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return [r.ok, await r.json().catch(() => ({}))]; };
     if (f.id === "set-setup") { const [ok, j] = await call("/api/auth/setup", data); if (!ok) return ($("#set-setup-err").textContent = j.detail || "创建失败"); location.reload(); }
     if (f.id === "set-pw") { const [ok, j] = await call("/api/auth/password", data); $("#set-pw-err").textContent = ok ? "已修改" : (j.detail || "修改失败"); }
+    if (f.id === "set-newkey") { const [ok, j] = await call("/api/keys", data); if (ok) { await openSettings("developer"); $("#set-keyout").innerHTML = `<div class="hook-url"><code>${esc(j.key)}</code><button type="button" class="btn ghost sm" data-copykey="${esc(j.key)}">${icon("copy")}复制</button></div><div class="sched-err">请立即复制保存，关闭后无法再次查看。</div>`; } return; }
     if (f.id === "set-adduser") { const [ok, j] = await call("/api/users", data); if (!ok) return ($("#set-adduser-err").textContent = j.detail || "添加失败"); openSettings("members"); }
   });
   $("#set-body").addEventListener("change", (e) => { if (e.target.id === "set-theme") { store.set("theme", e.target.value); applyTheme(e.target.value); } });
   $("#set-body").addEventListener("click", async (e) => {
     const g = e.target.closest("[data-set-goto]"); if (g) { e.preventDefault(); $("#settings-modal").classList.add("hidden"); openSession(g.dataset.setGoto); return; }
+    const ck = e.target.closest("[data-copykey]"); if (ck) { navigator.clipboard?.writeText(ck.dataset.copykey); ck.lastChild.textContent = "已复制"; return; }
+    const kd = e.target.closest("[data-key-del]"); if (kd && confirm("删除这个密钥？使用它的程序将立即失效。")) { await fetch(`/api/keys/${kd.dataset.keyDel}`, { method: "DELETE" }); openSettings("developer"); return; }
+    if (e.target.closest("#set-wipe") && confirm("确定删除你的所有任务？此操作无法恢复。") && confirm("再次确认：删除全部任务及其文件？")) { const r = await (await fetch("/api/data/tasks", { method: "DELETE" })).json(); alert(`已删除 ${r.deleted} 个任务`); location.hash = ""; location.reload(); return; }
     if (e.target.closest("#set-logout")) { await fetch("/api/auth/logout", { method: "POST" }); location.reload(); return; }
     const del = e.target.closest("[data-user-del]");
     if (del && confirm("删除这个成员？他的任务和数据会保留在服务器上，但无法再登录。")) { await fetch(`/api/users/${del.dataset.userDel}`, { method: "DELETE" }); openSettings("members"); return; }

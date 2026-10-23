@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import agents, auth, computers, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import agents, apikeys, auth, computers, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -37,6 +37,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     auth.store = auth.Users()
+    apikeys.store = apikeys.ApiKeys()
     session_mod.store = session_mod.SessionStore()
     projects.store = projects.Projects()
     personal.store = personal.Personal()
@@ -79,7 +80,7 @@ app = FastAPI(title="Manus-like agent platform", lifespan=lifespan)
 
 # Paths that work without signing in: sign-in itself, public share replays, incoming webhooks (secret URL),
 # the device connector (device token) and its downloads.
-OPEN_PATHS = ("/api/auth/", "/api/share/", "/api/hooks/", "/api/devices/connect", "/api/devices/agent.py", "/api/devices/server.py",
+OPEN_PATHS = ("/api/v1/", "/api/auth/", "/api/share/", "/api/hooks/", "/api/devices/connect", "/api/devices/agent.py", "/api/devices/server.py",
               "/api/config")
 
 
@@ -1301,6 +1302,106 @@ async def usage():
             "days": [{"day": k, **v} for k, v in sorted(days.items(), reverse=True)][:30],
             "models": [{"model": k, **v} for k, v in sorted(models.items(), key=lambda x: -x[1]["calls"])],
             "tasks": sorted(tasks, key=lambda t: -(t["input"] + t["output"]))[:20]}
+
+
+# ------------------------------------------------------------- data management (数据管理) ---
+
+@app.get("/api/data/export")
+async def export_data():
+    """Everything of the current user's as a zip: tasks (history, events, kept files), projects, settings."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for s in session_mod.store.sessions.values():
+            if not auth.visible({"owner": s.owner}):
+                continue
+            for f in s.dir.rglob("*"):
+                if f.is_file() and f.suffix != ".tmp":
+                    z.write(f, f"tasks/{s.session_id}/{f.relative_to(s.dir)}")
+        owned = lambda items: [x for x in items if auth.visible(x)]  # noqa: E731
+        z.writestr("projects.json", json.dumps(owned(projects.store.items.values()), ensure_ascii=False, indent=1))
+        z.writestr("schedules.json", json.dumps(owned(scheduler_mod.scheduler.items.values()), ensure_ascii=False, indent=1))
+        z.writestr("triggers.json", json.dumps(owned(triggers_mod.triggers.items.values()), ensure_ascii=False, indent=1))
+        z.writestr("agents.json", json.dumps(await list_agents(), ensure_ascii=False, indent=1))
+        z.writestr("personalization.json", json.dumps(personal.of(auth.owner()).view(), ensure_ascii=False, indent=1))
+    name = f"openmanus-export-{time.strftime('%Y%m%d-%H%M')}.zip"
+    return Response(buf.getvalue(), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.delete("/api/data/tasks")
+async def delete_all_tasks():
+    ids = [s.session_id for s in session_mod.store.sessions.values() if auth.visible({"owner": s.owner})]
+    for sid in ids:
+        await session_mod.store.delete(sid)
+    return {"deleted": len(ids)}
+
+
+# ------------------------------------------------------------- developer API (开发者) ---
+
+@app.get("/api/keys")
+async def list_keys():
+    return [apikeys.ApiKeys.public(k) for k in apikeys.store.items.values() if auth.visible(k)]
+
+
+@app.post("/api/keys")
+async def create_key(body: dict | None = None):
+    k, key = apikeys.store.create(str((body or {}).get("name") or ""), auth.owner())
+    return {**k, "key": key}
+
+
+@app.delete("/api/keys/{kid}")
+async def delete_key(kid: str):
+    _visible(apikeys.store.items.get(kid))
+    apikeys.store.delete(kid)
+    return {"ok": True}
+
+
+def _api_user(request: Request) -> None:
+    """/api/v1 calls authenticate with `Authorization: Bearer om_...` and run as the key's owner."""
+    key = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    k = apikeys.store.check(key) if key else None
+    if not k:
+        raise HTTPException(401, "invalid API key")
+    auth.current.set(auth.store.items.get(k["owner"]) if k.get("owner") else None)
+
+
+def _task_view(s) -> dict:
+    result = next((e["content"] for e in reversed(s.events) if e["type"] == "chat" and e["sender"] == "assistant"), None)
+    files = [{"name": f["filename"], "url": f"{config.PUBLIC_BASE_URL}{s.file_url(f['path'])}"} for f in s.files.values()
+             if "deliverable" in f["kinds"]]
+    return {"id": s.session_id, "title": s.title, "status": s.status, "url": f"{config.PUBLIC_BASE_URL}/#{s.session_id}",
+            "result": result, "files": files, "usage": s.usage}
+
+
+@app.post("/api/v1/tasks")
+async def api_create_task(body: dict, request: Request):
+    """Start a task: {"prompt": "...", "mode": "max|standard|lite"} -> {id, url, status}."""
+    _api_user(request)
+    prompt = str(body.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "prompt is required")
+    s = session_mod.store.create()
+    s.owner = auth.owner()
+    s.select_model({"mode": body["mode"]} if body.get("mode") else None)
+    s.persist()
+    await s.user_message(prompt, [])
+    return _task_view(s)
+
+
+@app.get("/api/v1/tasks/{sid}")
+async def api_get_task(sid: str, request: Request):
+    _api_user(request)
+    return _task_view(_session(sid))
+
+
+@app.post("/api/v1/tasks/{sid}/messages")
+async def api_task_message(sid: str, body: dict, request: Request):
+    """A follow-up or a reply to a question the task asked."""
+    _api_user(request)
+    s = _session(sid)
+    await s.user_message(str(body.get("content") or ""), [])
+    return _task_view(s)
 
 
 @app.get("/api/library")
