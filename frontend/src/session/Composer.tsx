@@ -60,6 +60,13 @@ export function Composer({ placeholder }: { placeholder?: string }) {
   const busy = !!S.current && S.status === "running";
   const hasText = S.input.trim().length > 0;
 
+  // Uncontrolled: render() is deferred to the next frame, so a controlled value would make React
+  // reset the DOM to the stale text after each change and break IME composition. Only push
+  // S.input into the DOM when it was changed elsewhere (cleared on submit, prefilled).
+  useLayoutEffect(() => {
+    const i = input.current;
+    if (i && i.value !== S.input) i.value = S.input;
+  });
   // grow with the text, up to 240px
   useLayoutEffect(() => {
     const i = input.current; if (!i) return;
@@ -91,7 +98,7 @@ export function Composer({ placeholder }: { placeholder?: string }) {
   return (
     <form id="composer" autoComplete="off" onSubmit={(e) => { e.preventDefault(); submit(S.input); }}>
       <Chips />
-      <textarea id="input" ref={input} rows={1} value={S.input}
+      <textarea id="input" ref={input} rows={1} defaultValue={S.input}
         placeholder={placeholder || (S.current ? "向 OpenManus 发送消息" : "分配一个任务或提问任何问题")}
         onChange={(e) => { S.input = e.target.value; render(); }} onKeyDown={onKey} />
       <div className="composer-bar">

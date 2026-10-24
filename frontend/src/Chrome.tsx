@@ -67,7 +67,7 @@ export function Nav() {
             <button className="mode-item" onClick={() => more(() => openPersonal())}><span><Icon name="user" /></span>个性化</button>
           </div></div>
         <div className={cx("nav-search", !S.navSearch && "hidden")} id="nav-search"><span><Icon name="search" /></span>
-          <input id="search-input" placeholder="搜索任务" autoFocus value={S.filter} onChange={(e) => { S.filter = e.target.value; render(); }} key={String(S.navSearch)} /></div>
+          <input id="search-input" placeholder="搜索任务" autoFocus defaultValue={S.filter} onChange={(e) => { S.filter = e.target.value; render(); }} key={String(S.navSearch)} /></div>
         <div className="nav-section">项目</div>
         <button className="nav-item" id="new-project" onClick={newProject}><span className="nav-ico"><Icon name="folderPlus" /></span><span className="nav-label">新项目</span></button>
         <div id="project-list">{S.projects.map((p) => (
