@@ -12,7 +12,9 @@
 ![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61DAFB)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-[功能](#功能) · [快速开始](#快速开始) · [配置](#配置) · [架构](#架构) · [开发](#开发) · [贡献](#贡献)
+[功能](#功能) · [界面预览](#界面预览) · [快速开始](#快速开始) · [配置](#配置) · [架构](#架构) · [开发](#开发) · [贡献](#贡献)
+
+<img src="docs/images/task.jpg" alt="OpenManus 任务界面：左侧是对话与交付结果，右侧「OpenManus 的电脑」显示 Agent 正在使用的浏览器" width="100%" />
 
 </div>
 
@@ -21,6 +23,7 @@
 ## 目录
 
 - [简介](#简介)
+- [界面预览](#界面预览)
 - [功能](#功能)
 - [快速开始](#快速开始)
 - [配置](#配置)
@@ -38,6 +41,34 @@
 OpenManus 参照 [Manus](https://manus.im) 的架构做了一份 clean-room 实现。每个任务分配一台独立的沙箱电脑（Docker 容器），Agent 在里面按「分析 → 选工具 → 执行 → 观察 → 迭代 → 交付」的循环工作。前端实时展示每一步，并提供可回放、可接管的「电脑」面板。
 
 实现原理分析（含 REA 逆向证据）见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/home.jpg" alt="首页：输入任务，或从创作入口和灵感模板开始" /></td>
+    <td width="50%"><img src="docs/images/files.jpg" alt="交付文件：结果中的文件卡片可直接预览，右侧电脑面板打开生成的图表" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>首页</b>：输入任务，或从创作入口和灵感模板开始</td>
+    <td align="center"><b>交付文件</b>：文件卡片可预览，电脑面板打开生成的图表</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/automations.jpg" alt="自动化：定时任务、条件触发器和 Webhook 触发器" /></td>
+    <td width="50%"><img src="docs/images/dark.jpg" alt="深色主题下的任务界面" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>自动化</b>：定时任务、条件触发和 Webhook</td>
+    <td align="center"><b>深色主题</b>：跟随系统或手动切换</td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/images/mobile.jpg" alt="手机端：可安装为 PWA 使用" width="300" /><br />
+  <b>手机端</b>：可安装为 PWA，随时查看和分配任务
+</p>
+
+> 截图中的任务由 `deepseek-chat` 在 Docker 沙箱中真实执行。
 
 ## 功能
 
