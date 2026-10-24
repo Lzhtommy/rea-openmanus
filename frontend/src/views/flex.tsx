@@ -37,7 +37,7 @@ function FlexForm() {
   useEffect(() => { sync(pid, syncN === 0 ? initModel : ""); }, [pid, syncN]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const p = providerInfo(pid), gw = pid === "litellm";
-  const opts: [string, string][] = [["litellm", "LiteLLM 网关（已配置）"], ...S.models.providers.map((x: Dict) => [x.id, x.label + (x.configured ? " ✓" : "")] as [string, string])];
+  const opts: [string, string][] = [["litellm", `服务器默认 · ${S.models.gatewayLabel || "LiteLLM 网关"}（已配置）`], ...S.models.providers.map((x: Dict) => [x.id, x.label + (x.configured ? " ✓" : "")] as [string, string])];
 
   const save = async (e: FormEvent) => {
     e.preventDefault();

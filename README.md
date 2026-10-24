@@ -94,7 +94,7 @@ OpenManus 参照 [Manus](https://manus.im) 的架构做了一份 clean-room 实�
 
 ### 模型与界面
 
-- **模型**：通过 LiteLLM 网关以 OpenAI chat completions 协议调用（默认 `claude-opus-5-5`）；`reasoning_effort` 映射为自适应思考，签名思考块在工具调用间回传，`cache_control` 做提示缓存
+- **模型**：`MANUS_LLM_PROVIDER` 选择模型提供商，默认 LiteLLM 网关（`claude-opus-5-5`），也可直连 OpenAI、Anthropic、Google、DeepSeek、Kimi、智谱、通义千问等或任意 OpenAI 兼容端点，统一以 OpenAI chat completions 协议调用；经 LiteLLM 时`reasoning_effort` 映射为自适应思考，签名思考块在工具调用间回传，`cache_control` 做提示缓存
 - **模式与 Flex**：Max / 标准 / Lite 三档；Flex 可用自己的密钥接 OpenAI、Anthropic、Google、xAI、DeepSeek、Kimi、智谱、通义千问、硅基流动、OpenRouter、Fireworks 或任意 OpenAI 兼容端点
 - **界面**：按 Manus 2.0 网页端还原（布局、设计变量和交互经 REA/CDP 实测），含工作日志、文件预览、时间轴回放、计划进度条、浅色/深色主题；可安装为 PWA 在手机上使用
 - **实时协议**：WebSocket 传输与 Manus 同构的事件（`chat` / `toolUsed` / `planUpdate` / `statusUpdate`），支持断线续传、运行中追加消息、向用户提问、停止后恢复
@@ -106,7 +106,7 @@ OpenManus 参照 [Manus](https://manus.im) 的架构做了一份 clean-room 实�
 - Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)
 - Node.js 20+（构建 Web 界面）
 - Docker（生产模式需要）
-- 一个 LiteLLM（或其他 OpenAI 兼容）网关及其 API key
+- 一个模型提供商的 API key（LiteLLM 网关、OpenAI、Anthropic、DeepSeek 等，或任意 OpenAI 兼容端点）
 
 ### 安装与运行
 
@@ -115,7 +115,7 @@ git clone https://github.com/Lzhtommy/rea-openmanus.git
 cd rea-openmanus
 
 # 1. 配置凭据
-cp .env.example .env          # 至少填写 MANUS_LLM_BASE_URL 和 MANUS_LLM_API_KEY
+cp .env.example .env          # 至少填写 MANUS_LLM_PROVIDER 和 MANUS_LLM_API_KEY（litellm / custom 还需 MANUS_LLM_BASE_URL）
 set -a; source .env; set +a
 
 # 2. 构建 Web 界面（输出到 frontend/dist，由后端托管）
@@ -148,9 +148,10 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `MANUS_LLM_BASE_URL` | — | LiteLLM 网关地址（OpenAI 兼容），**必填** |
-| `MANUS_LLM_API_KEY` | — | 网关 key（也可用 `LITELLM_API_KEY`） |
-| `MANUS_MODEL` | `claude-opus-5-5` | 网关上的模型名 |
+| `MANUS_LLM_PROVIDER` | `litellm` | 模型提供商：`litellm`、`openai`、`anthropic`、`google`、`xai`、`deepseek`、`moonshot`、`zhipu`、`qwen`、`siliconflow`、`openrouter`、`fireworks`，或 `custom`（任意 OpenAI 兼容端点，如 vLLM、Ollama、Azure） |
+| `MANUS_LLM_BASE_URL` | 提供商的官方地址 | 端点地址；`litellm` 和 `custom` **必填**，其他提供商填了会覆盖默认地址 |
+| `MANUS_LLM_API_KEY` | — | 该提供商的 API key（也可用 `LITELLM_API_KEY`），**必填** |
+| `MANUS_MODEL` | 提供商的推荐模型 | 模型名（如 `gpt-5.1`、`deepseek-chat`；LiteLLM 默认 `claude-opus-5-5`） |
 | `MANUS_MODEL_MAX` / `MANUS_MODEL_LITE` | 同 `MANUS_MODEL` | Max / Lite 模式使用的模型 |
 | `MANUS_DEFAULT_MODE` | `standard` | 新任务默认模式 |
 | `MANUS_REASONING` | `true` | 是否发送 `reasoning_effort` |
@@ -226,7 +227,7 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 └──────────────┘                    └──────────────┬───────────────┘              └───────────────────┘
                                                    │ OpenAI 协议
                                             ┌──────▼──────┐
-                                            │ LiteLLM 网关 │
+                                            │  模型提供商   │
                                             └─────────────┘
 ```
 
@@ -240,7 +241,7 @@ backend/
     main.py         HTTP + WebSocket API、文件上传下载、端口预览代理
     session.py      会话：事件日志、LLM 历史、计划、收件箱、追问建议
     agent.py        Agent 循环、工具分发、可恢复压缩、Wide Research
-    llm.py          LiteLLM 网关客户端（Anthropic 块格式 ↔ OpenAI chat 格式）
+    llm.py          模型客户端（Anthropic 块格式 ↔ OpenAI chat 格式）
     tools.py        动作空间定义（统一前缀、角色遮蔽、UI 分类）
     prompts.py      系统提示词、Planner 提示词、子代理说明
     sandbox.py      沙箱生命周期（Docker / 本地）和动作 API 客户端

@@ -181,11 +181,11 @@ export function toggleTakeover() {
 }
 
 // ------------------------------------------------------------------ modes & Flex ---
-// Max / standard / Lite run on the gateway; Flex runs on any configured provider with your own key.
+// Max / standard / Lite run on the server's endpoint ("litellm"); Flex runs on any configured provider with your own key.
 export const defaultSel = (): Dict => ({ mode: S.models.default || "standard" });
 export const currentSel = (): Dict => S.modelSel || defaultSel();
 export const providerInfo = (id: string): Dict | undefined =>
-  (id === "litellm" ? { id, label: "LiteLLM 网关", configured: true, model: S.cfg.model } : S.models.providers.find((p: Dict) => p.id === id));
+  (id === "litellm" ? { id, label: S.models.gatewayLabel || "LiteLLM 网关", configured: true, model: S.cfg.model } : S.models.providers.find((p: Dict) => p.id === id));
 export function selLabel(sel = currentSel()) {
   if (sel.mode === "flex") return `Flex · ${shortModel(sel.model || providerInfo(sel.provider)?.model || "")}`;
   return S.models.modes.find((m: Dict) => m.id === sel.mode)?.label || "OpenManus";

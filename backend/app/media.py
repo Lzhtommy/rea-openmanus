@@ -19,7 +19,7 @@ import time
 import httpx
 import openai
 
-from . import config
+from . import config, providers
 
 SIZES = {"1:1": "1024x1024", "16:9": "1792x1024", "9:16": "1024x1792", "4:3": "1536x1152", "3:4": "1152x1536"}
 
@@ -29,7 +29,8 @@ class MediaError(Exception):
 
 
 def _client() -> openai.AsyncOpenAI:
-    return openai.AsyncOpenAI(base_url=config.LLM_BASE_URL, api_key=config.LLM_API_KEY, timeout=300, max_retries=1)
+    _, base, key = providers.default_endpoint()
+    return openai.AsyncOpenAI(base_url=base, api_key=key, timeout=300, max_retries=1)
 
 
 def _why(e: Exception) -> str:
@@ -103,8 +104,9 @@ async def generate_video(prompt: str, seconds: int = 8, reference: tuple[bytes, 
     model = config.VIDEO_MODEL
     if not model:
         raise MediaError("video generation is not configured (MANUS_VIDEO_MODEL)")
-    base = config.LLM_BASE_URL.rstrip("/").removesuffix("/v1")
-    headers = {"Authorization": f"Bearer {config.LLM_API_KEY}"}
+    _, base, key = providers.default_endpoint()
+    base = base.rstrip("/").removesuffix("/v1")
+    headers = {"Authorization": f"Bearer {key}"}
     size = {"16:9": "1280x720", "9:16": "720x1280", "1:1": "1024x1024"}.get(aspect_ratio, "1280x720")
     async with httpx.AsyncClient(timeout=120, headers=headers) as h:
         data = {"model": model, "prompt": prompt, "seconds": str(seconds), "size": size}

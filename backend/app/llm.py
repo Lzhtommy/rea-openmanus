@@ -1,13 +1,13 @@
-"""LLM access through an OpenAI-compatible chat-completions gateway (LiteLLM proxy).
+"""LLM access through any OpenAI-compatible chat-completions endpoint (a LiteLLM gateway or a provider's own API).
 
 The agent keeps its history in Anthropic content-block form (text / thinking / tool_use /
 tool_result / image) because that is what the loop reasons about. This module converts that
 history to chat-completions messages on the way out and the reply back into blocks on the
 way in, so nothing above this layer knows which wire format is in use.
 
-LiteLLM specifics used here: `reasoning_effort` (mapped to Claude adaptive thinking),
-`thinking_blocks` on assistant messages (Claude needs the signed thinking replayed during
-tool use), and `cache_control` on content parts (Anthropic prompt caching).
+Provider-specific extras, sent only where providers.CATALOG says they are accepted: `reasoning_effort`
+(LiteLLM maps it to Claude adaptive thinking), `thinking_blocks` on assistant messages (Claude needs the
+signed thinking replayed during tool use), and `cache_control` on content parts (Anthropic prompt caching).
 """
 
 from __future__ import annotations
@@ -35,12 +35,15 @@ _clients: dict[tuple[str, str], openai.AsyncOpenAI] = {}
 
 
 def client(p: Profile | None = None) -> openai.AsyncOpenAI:
-    """One client per (endpoint, key): the gateway and every Flex provider."""
+    """One client per (endpoint, key): the server's endpoint and every Flex provider."""
     p = p or providers.resolve(None)
+    server = (p.base_url, p.api_key) == providers.default_endpoint()[1:]
     if not p.base_url:
-        raise openai.OpenAIError("MANUS_LLM_BASE_URL is not set" if p.provider == "litellm" else f"{p.provider}: base URL is not set")
+        raise openai.OpenAIError("MANUS_LLM_BASE_URL is not set" if server else f"{p.provider}: base URL is not set")
     if not p.api_key:
-        raise openai.OpenAIError("MANUS_LLM_API_KEY is not set" if p.provider == "litellm" else f"{p.provider}: API key is not set")
+        raise openai.OpenAIError("MANUS_LLM_API_KEY is not set" if server else f"{p.provider}: API key is not set")
+    if not p.model:
+        raise openai.OpenAIError("MANUS_MODEL is not set" if server else f"{p.provider}: model is not set")
     key = (p.base_url, p.api_key)
     if key not in _clients:
         _clients[key] = openai.AsyncOpenAI(api_key=p.api_key, base_url=p.base_url, max_retries=4, timeout=600)

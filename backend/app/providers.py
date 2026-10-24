@@ -1,7 +1,9 @@
 """Model providers and agent modes (Manus' Max / 2.0 / Lite modes and "Manus Flex": bring your own key).
 
-A *mode* is a preset over the default gateway (LiteLLM): which model, how much reasoning, whether the
-planner runs. *Flex* runs a task on any configured OpenAI-compatible provider with the user's own key.
+A *mode* is a preset over the server's own endpoint (MANUS_LLM_PROVIDER, a LiteLLM gateway by default):
+which model, how much reasoning, whether the planner runs. *Flex* runs a task on any configured
+OpenAI-compatible provider with the user's own key. In a selection, provider "litellm" means the server's
+own endpoint, whichever provider that is.
 Keys are stored server-side in data/providers.json (0600) and never returned to the browser.
 
 Providers differ in what they accept beyond the core chat-completions API; each one declares the
@@ -18,7 +20,7 @@ from . import config
 
 # id -> label, default base URL, extras it accepts, suggested default model
 CATALOG: dict[str, dict] = {
-    "litellm": {"label": "LiteLLM 网关", "base": config.LLM_BASE_URL, "extras": {"drop_params", "cache_control", "reasoning", "thinking_blocks"}},
+    "litellm": {"label": "LiteLLM 网关", "base": "", "extras": {"drop_params", "cache_control", "reasoning", "thinking_blocks"}, "model": "claude-opus-5-5"},
     "openai": {"label": "OpenAI", "base": "https://api.openai.com/v1", "extras": {"reasoning"}, "model": "gpt-5.1"},
     "anthropic": {"label": "Anthropic", "base": "https://api.anthropic.com/v1/", "extras": set(), "model": "claude-opus-5-5"},
     "google": {"label": "Google AI Studio", "base": "https://generativelanguage.googleapis.com/v1beta/openai/", "extras": {"reasoning"}, "model": "gemini-3.1-pro-preview"},
@@ -104,9 +106,27 @@ class ProviderStore:
 
     def credentials(self, pid: str) -> tuple[str, str]:
         if pid == "litellm":
-            return config.LLM_BASE_URL, config.LLM_API_KEY
+            return default_endpoint()[1:]
         it = self.items.get(pid, {})
         return it.get("baseUrl") or CATALOG[pid]["base"], it.get("apiKey", "")
+
+
+if config.LLM_PROVIDER not in CATALOG:
+    raise ValueError(f"MANUS_LLM_PROVIDER={config.LLM_PROVIDER!r} is not one of: {', '.join(CATALOG)}")
+
+
+def default_endpoint() -> tuple[str, str, str]:
+    """The server's own endpoint: (provider id, base URL, API key)."""
+    pid = config.LLM_PROVIDER
+    return pid, config.LLM_BASE_URL or CATALOG[pid]["base"], config.LLM_API_KEY
+
+
+def default_model() -> str:
+    return config.MODEL or CATALOG[config.LLM_PROVIDER].get("model", "")
+
+
+def default_label() -> str:
+    return CATALOG[config.LLM_PROVIDER]["label"]
 
 
 store = ProviderStore()
@@ -115,7 +135,8 @@ MODE_EFFORT = {"max": ("high", "medium"), "standard": ("medium", "low"), "lite":
 
 
 def mode_models() -> dict[str, str]:
-    return {"max": config.MODEL_MAX, "standard": config.MODEL, "lite": config.MODEL_LITE}
+    m = default_model()
+    return {"max": config.MODEL_MAX or m, "standard": m, "lite": config.MODEL_LITE or m}
 
 
 def resolve(selection: dict | None) -> Profile:
@@ -126,13 +147,18 @@ def resolve(selection: dict | None) -> Profile:
         pid = sel.get("provider") or "litellm"
         if pid not in CATALOG:
             raise ValueError(f"unknown provider {pid}")
-        base, key = store.credentials(pid)
-        model = sel.get("model") or store.public(pid)["model"] if pid != "litellm" else (sel.get("model") or config.MODEL)
+        if pid == "litellm":  # the server's own endpoint
+            pid, base, key = default_endpoint()
+            model = sel.get("model") or default_model()
+        else:
+            base, key = store.credentials(pid)
+            model = sel.get("model") or store.public(pid)["model"]
         return Profile(pid, base, key, model, config.EFFORT, config.SUBAGENT_EFFORT, config.PLANNER_ENABLED,
                        frozenset(CATALOG[pid]["extras"]))
     effort, sub = MODE_EFFORT[mode]
-    return Profile("litellm", config.LLM_BASE_URL, config.LLM_API_KEY, mode_models()[mode], effort, sub,
-                   config.PLANNER_ENABLED and mode != "lite", frozenset(CATALOG["litellm"]["extras"]))
+    pid, base, key = default_endpoint()
+    return Profile(pid, base, key, mode_models()[mode], effort, sub,
+                   config.PLANNER_ENABLED and mode != "lite", frozenset(CATALOG[pid]["extras"]))
 
 
 def describe(selection: dict | None) -> dict:

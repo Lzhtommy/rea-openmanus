@@ -728,15 +728,16 @@ _gateway_models: list[str] = []
 async def models():
     """Modes over the gateway and the Flex providers (keys never leave the server)."""
     global _gateway_models
-    if not _gateway_models and config.LLM_BASE_URL and config.LLM_API_KEY:
+    _, base, key = providers.default_endpoint()
+    if not _gateway_models and base and key:
         try:
-            _gateway_models = await llm.list_models(config.LLM_BASE_URL, config.LLM_API_KEY)
+            _gateway_models = await llm.list_models(base, key)
         except Exception:
             _gateway_models = []
     mm = providers.mode_models()
     return {"default": config.DEFAULT_MODE,
             "modes": [{**m, "model": mm.get(m["id"], "")} for m in providers.MODES],
-            "gatewayModels": _gateway_models,
+            "gatewayModels": _gateway_models, "gatewayLabel": providers.default_label(),
             "providers": providers.store.catalog()}
 
 
@@ -1556,7 +1557,7 @@ async def _relay_vnc(websocket: WebSocket, sb) -> None:
 
 @app.get("/api/config")
 async def get_config():
-    return {"model": config.MODEL, "defaultMode": config.DEFAULT_MODE, "sandbox": config.SANDBOX_MODE, "planner": config.PLANNER_ENABLED,
+    return {"model": providers.default_model(), "defaultMode": config.DEFAULT_MODE, "sandbox": config.SANDBOX_MODE, "planner": config.PLANNER_ENABLED,
             "search": "tavily" if config.TAVILY_API_KEY else "duckduckgo", "mail": mail.CFG["ADDRESS"] or (mail.CFG["USER"] if mail.enabled() else ""), "media": media.capabilities()}
 
 
