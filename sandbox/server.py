@@ -107,6 +107,14 @@ class ShellSession:
 shells: dict[str, ShellSession] = {}
 
 
+@app.on_event("shutdown")
+def kill_shells() -> None:
+    """Shells run in their own sessions; end them with the server. In local mode the sandbox is a
+    host process, and a leftover `http.server` would keep its port after the sandbox is gone."""
+    for s in shells.values():
+        s.kill()
+
+
 class ShellExec(BaseModel):
     id: str
     command: str
