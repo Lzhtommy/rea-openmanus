@@ -26,10 +26,10 @@ class Recordings:
     def sandbox_id(self, r: dict) -> str:
         return r["target"].replace("dev:", "dev-", 1) if r["target"].startswith("dev:") else f"rec-{r['id']}"
 
-    async def start(self, target: str, url: str) -> dict:
+    async def start(self, target: str, url: str, owner: str | None = None) -> dict:
         if url and "://" not in url:
             url = "https://" + url
-        r = {"id": secrets.token_hex(4), "target": target or "cloud", "url": url, "startedAt": time.time(), "status": "recording"}
+        r = {"id": secrets.token_hex(4), "target": target or "cloud", "url": url, "startedAt": time.time(), "status": "recording", "owner": owner}
         self.items[r["id"]] = r
         sb = await manager.get(self.sandbox_id(r))
         r["vnc"] = sb.vnc

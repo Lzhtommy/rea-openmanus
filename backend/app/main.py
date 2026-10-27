@@ -205,6 +205,12 @@ def _admin() -> dict:
     return u
 
 
+def _org_admin() -> None:
+    """Organization-wide settings: anyone in single-user mode, only admins once sign-in is on."""
+    if auth.store and auth.store.enabled:
+        _admin()
+
+
 @app.get("/api/users")
 async def list_users():
     _admin()
@@ -320,6 +326,7 @@ async def get_session(sid: str):
 
 @app.delete("/api/sessions/{sid}")
 async def delete_session(sid: str):
+    _session(sid)
     await session_mod.store.delete(sid)
     return {"ok": True}
 
@@ -575,7 +582,7 @@ async def delete_team(tid: str):
 
 def _recording(rid: str) -> dict:
     r = recordings.store.items.get(rid)
-    if not r:
+    if not r or not auth.visible(r):
         raise HTTPException(404, "recording not found")
     return r
 
@@ -585,10 +592,10 @@ async def start_recording(body: dict):
     """Start recording in a cloud browser ("cloud") or the user's own browser on a device ("dev:<id>")."""
     from .sandbox import SandboxError
     target = str(body.get("target") or "cloud")
-    if target.startswith("dev:") and target[4:] not in devices.store.items:
+    if target.startswith("dev:") and not auth.visible(devices.store.items.get(target[4:])):
         raise HTTPException(404, "device not found")
     try:
-        return await recordings.store.start(target, str(body.get("url") or "").strip())
+        return await recordings.store.start(target, str(body.get("url") or "").strip(), auth.owner())
     except SandboxError as e:
         raise HTTPException(400, str(e))
 
@@ -613,13 +620,17 @@ async def stop_recording(rid: str, body: dict | None = None):
 
 @app.delete("/api/recordings/{rid}")
 async def cancel_recording(rid: str):
+    _recording(rid)
     await recordings.store.cancel(rid)
     return {"ok": True}
 
 
 @app.websocket("/api/recordings/{rid}/vnc")
 async def recording_vnc(websocket: WebSocket, rid: str):
+    allowed, user = _ws_user(websocket)
     r = recordings.store.items.get(rid)
+    if not allowed or (r and user and r.get("owner") != user["id"]):
+        r = None
     await _relay_vnc(websocket, manager.sandboxes.get(recordings.store.sandbox_id(r)) if r else None)
 
 
@@ -769,6 +780,7 @@ async def _probe(base: str, key: str, model: str) -> list[str]:
 
 @app.put("/api/providers/{pid}")
 async def set_provider(pid: str, body: dict):
+    _org_admin()  # the stored key is sent to baseUrl when probing
     if pid not in providers.CATALOG or pid == "litellm":
         raise HTTPException(404, "unknown provider")
     base = (body.get("baseUrl") or providers.store.public(pid)["baseUrl"]).strip()
@@ -785,6 +797,7 @@ async def set_provider(pid: str, body: dict):
 
 @app.delete("/api/providers/{pid}")
 async def delete_provider(pid: str):
+    _org_admin()
     providers.store.delete(pid)
     return {"ok": True}
 
@@ -811,6 +824,7 @@ async def list_connectors():
 
 @app.post("/api/connectors")
 async def create_connector(body: dict):
+    _org_admin()  # stdio connectors run their command on this host
     try:
         return await connectors.manager.upsert(body)
     except ValueError as e:
@@ -819,6 +833,7 @@ async def create_connector(body: dict):
 
 @app.patch("/api/connectors/{cid}")
 async def update_connector(cid: str, body: dict):
+    _org_admin()
     if cid not in connectors.manager.items:
         raise HTTPException(404, "connector not found")
     try:
@@ -829,12 +844,14 @@ async def update_connector(cid: str, body: dict):
 
 @app.delete("/api/connectors/{cid}")
 async def delete_connector(cid: str):
+    _org_admin()
     await connectors.manager.delete(cid)
     return {"ok": True}
 
 
 @app.post("/api/connectors/{cid}/restart")
 async def restart_connector(cid: str):
+    _org_admin()
     if cid not in connectors.manager.items:
         raise HTTPException(404, "connector not found")
     await connectors.manager.restart(cid)
@@ -855,6 +872,7 @@ async def list_plugins():
 @app.post("/api/plugins/{pid}/install")
 async def install_plugin(pid: str, body: dict):
     """Render the catalog entry with the user's values and save it as a connector (re-install updates it)."""
+    _org_admin()
     try:
         cfg = plugins.build(pid, body.get("values") or {})
     except plugins.PluginError as e:
