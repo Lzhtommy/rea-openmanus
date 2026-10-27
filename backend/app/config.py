@@ -63,6 +63,8 @@ PLANNER_ENABLED = _bool("MANUS_PLANNER", True)
 CONFIRM_ENABLED = _bool("MANUS_CONFIRM", True)
 # After a task finishes, suggest follow-up requests (Manus' `suggestion` step).
 SUGGESTIONS_ENABLED = _bool("MANUS_SUGGESTIONS", True)
+# Tasks that were running when the backend stopped carry on by themselves when it starts again.
+RESUME_TASKS = _bool("MANUS_RESUME_TASKS", True)
 # Send browser screenshots to the model as images (better grounding, more tokens).
 BROWSER_VISION = _bool("MANUS_BROWSER_VISION", True)
 # published sites are served at <slug>.<SITES_DOMAIN> (default: PUBLIC_BASE_URL's host, e.g. localhost:8000)

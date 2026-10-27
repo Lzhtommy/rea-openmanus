@@ -53,7 +53,8 @@ async def lifespan(app: FastAPI):
     manager.busy, manager.on_stopped = busy, stopped
     manager.reaper = asyncio.create_task(manager.reap_loop())
     connectors.manager = connectors.Connectors()
-    asyncio.create_task(connectors.manager.start_all())
+    connectors_started = asyncio.create_task(connectors.manager.start_all())
+    asyncio.create_task(session_mod.store.resume_interrupted(connectors_started))
     yield
     await scheduler_mod.scheduler.stop()
     await triggers_mod.triggers.stop()

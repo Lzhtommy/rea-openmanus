@@ -1210,3 +1210,66 @@ async def test_agent_phone(store, monkeypatch):
     s.resolve_confirm(next(iter(s.pending_confirms)), True)
     await wait_status(s, {"idle"})
     assert posted[0][0] == "Calls" and 'language="zh-CN"' in posted[0][1]["Twiml"] and "&lt;请确认&gt;" in posted[0][1]["Twiml"]
+
+
+@pytest.mark.asyncio
+async def test_resume_after_restart(store, monkeypatch, tmp_path):
+    """A task running when the backend stopped carries on from its history when it starts again."""
+    monkeypatch.setattr(config, "SESSIONS_DIR", tmp_path / "sessions")
+    s = session_mod.SessionStore().create()
+    cut_short = tool("shell_exec", command="echo hi")
+    s.messages = [{"role": "user", "content": [{"type": "text", "text": "write a report"}]},
+                  {"role": "assistant", "content": [cut_short]}]
+    s.status = "running"  # the backend stopped here, mid-action
+    s.persist()
+    planned = []
+
+    async def no_plan(*a, **kw):
+        planned.append(a)
+
+    monkeypatch.setattr(llm, "plan", no_plan)
+    monkeypatch.setattr(llm, "agent_step", ScriptedModel([msg(tool("idle"))]))
+
+    restarted = session_mod.SessionStore()
+    r = restarted.get(s.session_id)
+    assert r.status == "stopped" and r.interrupted
+    assert await restarted.resume_interrupted() == [s.session_id]
+    await wait_status(r, {"idle"})
+    assert_valid_history(r.messages)
+    cut = next(b for m in r.messages if m["role"] == "user" for b in m["content"] if b.get("type") == "tool_result")
+    assert cut["tool_use_id"] == cut_short["id"] and "backend restarted" in cut["content"]
+    assert any(session_mod.RESUME_NOTE in b.get("text", "") for m in r.messages if m["role"] == "user" for b in m["content"])
+    assert not planned and r.resumes == 0
+    assert not session_mod.SessionStore().get(s.session_id).interrupted  # finished: nothing to resume next time
+
+
+@pytest.mark.asyncio
+async def test_resume_limits(store, monkeypatch, tmp_path):
+    """Not resumed: a task that keeps getting interrupted, an old one, one waiting for the user, or with resuming off."""
+    import time
+    monkeypatch.setattr(config, "SESSIONS_DIR", tmp_path / "sessions")
+    sessions = session_mod.SessionStore()
+
+    def stopped_while(status="running", resumes=0, age=0.0):
+        s = sessions.create()
+        s.status, s.resumes, s.created_at = status, resumes, time.time() - age
+        s.persist()
+        return s.session_id
+
+    looping, old, waiting = stopped_while(resumes=session_mod.RESUME_MAX), stopped_while(age=2 * 86400), stopped_while("waiting")
+    started = []
+
+    async def fake_resume(self):
+        started.append(self.session_id)
+
+    monkeypatch.setattr(session_mod.Session, "resume", fake_resume)
+    restarted = session_mod.SessionStore()
+    assert not restarted.get(waiting).interrupted and restarted.get(waiting).status == "stopped"
+    assert await restarted.resume_interrupted() == [] and not started
+
+    fresh = stopped_while()
+    monkeypatch.setattr(config, "RESUME_TASKS", False)
+    assert await session_mod.SessionStore().resume_interrupted() == []
+    monkeypatch.setattr(config, "RESUME_TASKS", True)
+    assert await session_mod.SessionStore().resume_interrupted() == [fresh] and started == [fresh]
+    assert looping and old

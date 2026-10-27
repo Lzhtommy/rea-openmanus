@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import json
 import mimetypes
@@ -22,6 +23,15 @@ from .agent import Agent, AgentHost, now_ms, render_plan, short_id
 from .sandbox import manager
 
 log = logging.getLogger("manus.session")
+
+# Resuming a task the backend was running when it stopped (config.RESUME_TASKS)
+RESUME_MAX = 2  # automatic resumes in a row without the task finishing: a task that keeps crashing the backend stays stopped
+RESUME_WITHIN = 24 * 3600  # only tasks active this recently (seconds)
+RESUME_INTERRUPTED = ("Interrupted: the backend restarted before this action completed. It may or may not have taken "
+                      "effect; check before repeating it.")
+RESUME_NOTE = ("<system-reminder>The backend restarted while you were working on this task. Files in the sandbox are "
+               "kept, but processes you started there (servers, background jobs) may have stopped. Continue the task "
+               "from where you left off; do not start over.</system-reminder>")
 
 
 class Session(AgentHost):
@@ -62,6 +72,8 @@ class Session(AgentHost):
         self.personal_note = ""  # last profile / instructions / knowledge told to the agent (re-sent when it changes)
         self.model_selection: dict = {}  # {mode, provider?, model?} chosen in the UI (Manus' mode selector)
         self.task: asyncio.Task | None = None
+        self.interrupted = False  # was running when the backend stopped (see SessionStore.resume_interrupted)
+        self.resumes = 0  # automatic resumes since the task last finished a run
         self.subscribers: set[asyncio.Queue] = set()
         self.dir = config.SESSIONS_DIR / sid
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -95,7 +107,7 @@ class Session(AgentHost):
                                                         "mrCache": self.map_reduce_cache,
                                                         "projectAnnounced": self.project_announced,
                                                         "personalNote": self.personal_note, "skillsNote": self.skills_note,
-                                                        "roleAnnounced": self.role_announced, "usage": self.usage}, ensure_ascii=False))
+                                                        "roleAnnounced": self.role_announced, "usage": self.usage, "resumes": self.resumes}, ensure_ascii=False))
         storage.write_text(self.dir / "messages.json", json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
@@ -120,9 +132,13 @@ class Session(AgentHost):
         s.map_reduce_cache = meta.get("mrCache", {})
         s.personal_note = meta.get("personalNote", "")
         s.skills_note = meta.get("skillsNote", "")
+        s.resumes = meta.get("resumes", 0)
         s.status = meta.get("status", "idle")
         if s.status in ("running", "waiting"):
-            s.status = "stopped"  # process restarted mid-run
+            # Process restarted mid-run. A running task can carry on; one waiting for the user (a question,
+            # an approval) lost what it was waiting on, and goes on when they reply.
+            s.interrupted = s.status == "running"
+            s.status = "stopped"
         if (d / "messages.json").exists():
             s.messages = json.loads((d / "messages.json").read_text())
         if (d / "events.jsonl").exists():
@@ -384,7 +400,15 @@ class Session(AgentHost):
         await self.emit({"type": "statusUpdate", "agentStatus": "stopped", "description": "Stopped by user"})
         self.persist()
 
-    async def _run(self, text: str) -> None:
+    async def resume(self) -> None:
+        """Carry on with a task the backend was running when it stopped: same history, no new request."""
+        self.interrupted = False
+        self.resumes += 1
+        self.status = "running"
+        self.task = asyncio.create_task(self._run(RESUME_NOTE, resume=True))
+
+    async def _run(self, text: str, resume: bool = False) -> None:
+        """resume: text is RESUME_NOTE, not a request from the user (no planning or follow-up suggestions)."""
         run_started, wall = time.monotonic(), time.time()
         try:
             await self.emit({"type": "statusUpdate", "agentStatus": "running"})
@@ -394,6 +418,8 @@ class Session(AgentHost):
             await skills.store.install(sandbox, self.picked_skills)
             profile = providers.resolve(self.model_selection)
             agent = Agent(self, sandbox, self.messages, profile=profile)
+            if resume:
+                agent.repair_history(RESUME_INTERRUPTED)
             agent.repair_history()
             first_turn = not self.messages
             agent._append_user_blocks([{"type": "text", "text": text}])
@@ -444,7 +470,7 @@ class Session(AgentHost):
             if connectors.manager and (summary := connectors.manager.summary()) != self.connectors_note:
                 system_notes.append(summary or "<connectors>\nNo MCP servers are connected now.\n</connectors>")
                 self.connectors_note = summary
-            if profile.planner:
+            if profile.planner and not resume:
                 await self.emit({"type": "liveStatus", "text": "Planning"})
                 context = "" if first_turn else "Current plan:\n" + render_plan(self.plan)
                 p = await llm.plan(text, context, profile)
@@ -479,8 +505,10 @@ class Session(AgentHost):
 
             await agent.run()
             if self.status not in ("error",):
+                self.resumes = 0
                 await self.emit({"type": "statusUpdate", "agentStatus": "idle", "description": "Task completed"})
-                await self._suggest(text)
+                if not resume:
+                    await self._suggest(text)
                 await self._promote(wall)
         except asyncio.CancelledError:
             raise
@@ -556,6 +584,27 @@ class SessionStore:
 
     def get(self, sid: str) -> Session | None:
         return self.sessions.get(sid)
+
+    async def resume_interrupted(self, ready: asyncio.Future | None = None) -> list[str]:
+        """Resume the tasks that were running when the backend stopped. ready: wait for it first (connectors)."""
+        if ready:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(asyncio.shield(ready), 30)
+        resumed = []
+        for s in list(self.sessions.values()):
+            if not s.interrupted:
+                continue
+            s.interrupted = False
+            if s.task and not s.task.done():  # the user already carried on themselves
+                continue
+            last = s.events[-1]["timestamp"] / 1000 if s.events else s.created_at
+            if not config.RESUME_TASKS or s.resumes >= RESUME_MAX or time.time() - last > RESUME_WITHIN:
+                log.info("not resuming %s (resumes=%d, idle %.0fs)", s.session_id, s.resumes, time.time() - last)
+                continue
+            log.info("resuming %s after a restart", s.session_id)
+            await s.resume()
+            resumed.append(s.session_id)
+        return resumed
 
     def list(self) -> list[dict]:
         return sorted((s.meta() for s in self.sessions.values()), key=lambda m: -m["createdAt"])

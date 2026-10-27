@@ -188,15 +188,14 @@ class Agent:
             "brief": (m.group(1) if m else "")[:160], "planStepId": self.plan_step_id, "message": {"action": act, "param": ""},
             "detail": {"argumentsLength": len(args)}}))
 
-    def repair_history(self) -> None:
+    def repair_history(self, reason: str = "Interrupted: the user stopped the task before this action completed.") -> None:
         """After a cancel/crash, close any tool_use left without results."""
         if not self.messages or self.messages[-1]["role"] != "assistant":
             return
         dangling = [b for b in self.messages[-1]["content"] if b.get("type") == "tool_use"]
         if dangling:
             self.messages.append({"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
-                 "content": "Interrupted: the user stopped the task before this action completed."}
+                {"type": "tool_result", "tool_use_id": b["id"], "is_error": True, "content": reason}
                 for b in dangling]})
 
     def _append_user_blocks(self, blocks: list[dict]) -> None:

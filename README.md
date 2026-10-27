@@ -208,6 +208,7 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 | `MANUS_PLANNER` | `true` | 是否启用 Planner |
 | `MANUS_CONFIRM` | `true` | 有外部影响的操作是否需要确认 |
 | `MANUS_SUGGESTIONS` | `true` | 任务结束后是否生成追问建议 |
+| `MANUS_RESUME_TASKS` | `true` | 后端重启后，是否自动继续重启前正在运行的任务（24 小时内的任务；连续中断 2 次后不再自动继续） |
 | `MANUS_BROWSER_VISION` | `true` | 是否把浏览器截图发给模型 |
 | `MANUS_OBSERVATION_LIMIT` | `12000` | 观察结果超过此字符数就落盘压缩 |
 | `MANUS_WIDE_CONCURRENCY` / `MANUS_WIDE_MAX_TASKS` | `4` / `20` | Wide Research 并发数和子任务上限 |
