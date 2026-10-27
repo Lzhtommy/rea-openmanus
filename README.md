@@ -63,11 +63,6 @@ OpenManus 参照 [Manus](https://manus.im) 的架构做了一份 clean-room 实�
   </tr>
 </table>
 
-<p align="center">
-  <img src="docs/images/mobile.jpg" alt="手机端：可安装为 PWA 使用" width="300" /><br />
-  <b>手机端</b>：可安装为 PWA，随时查看和分配任务
-</p>
-
 > 截图中的任务由 `deepseek-chat` 在 Docker 沙箱中真实执行。
 
 ## 功能
@@ -120,15 +115,15 @@ OpenManus 参照 [Manus](https://manus.im) 的架构做了一份 clean-room 实�
 - **多用户**：创建管理员后启用登录，数据按用户隔离，技能和插件组织共享；支持飞书登录
 - **操作确认**：部署、推送、发布、对外发送、远程登录、大范围删除等操作会挂起，用户允许后才执行
 - **分享回放**：生成可撤销的只读链接，访客可按原节奏回放工作日志和电脑面板
-- **资料库与数据**：交付文件和上传另存到会话目录，容器删除后仍可下载；支持跨任务浏览筛选、导出全部数据或删除所有任务
+- **资料库与数据**：应用数据存于 `data/manus.db`（SQLite，旧版 JSON 文件首次启动时自动导入）；交付文件和上传另存到会话目录，容器删除后仍可下载；支持跨任务浏览筛选、导出全部数据或删除所有任务
 - **用量统计与通知**：按任务、模型、日期统计运行时长、调用次数和 tokens（含缓存命中）；可开启桌面通知
 
 ### 模型与界面
 
-- **模型**：`MANUS_LLM_PROVIDER` 选择模型提供商，默认 LiteLLM 网关（`claude-opus-5-5`），也可直连 OpenAI、Anthropic、Google、DeepSeek、Kimi、智谱、通义千问等或任意 OpenAI 兼容端点，统一以 OpenAI chat completions 协议调用；经 LiteLLM 时`reasoning_effort` 映射为自适应思考，签名思考块在工具调用间回传，`cache_control` 做提示缓存
+- **模型**：`MANUS_LLM_PROVIDER` 选择模型提供商，默认 LiteLLM 网关（`claude-opus-5-5`），也可直连 OpenAI、Anthropic、Google、DeepSeek、Kimi、智谱、通义千问等或任意 OpenAI 兼容端点，统一以 OpenAI chat completions 协议调用；经 LiteLLM 时 `reasoning_effort` 映射为自适应思考，签名思考块在工具调用间回传，`cache_control` 做提示缓存
 - **模式与 Flex**：Max / 标准 / Lite 三档；Flex 可用自己的密钥接 OpenAI、Anthropic、Google、xAI、DeepSeek、Kimi、智谱、通义千问、硅基流动、OpenRouter、Fireworks 或任意 OpenAI 兼容端点
 - **界面**：按 Manus 2.0 网页端还原（布局、设计变量和交互经 REA/CDP 实测），含工作日志、文件预览、时间轴回放、计划进度条、浅色/深色主题；可安装为 PWA 在手机上使用
-- **实时协议**：WebSocket 传输与 Manus 同构的事件（`chat` / `toolUsed` / `planUpdate` / `statusUpdate`），支持断线续传、运行中追加消息、向用户提问、停止后恢复
+- **实时协议**：WebSocket 传输与 Manus 同构的事件（`chat` / `toolUsed` / `planUpdate` / `statusUpdate`），支持断线续传、运行中追加消息、向用户提问、停止后恢复；后端重启后，重启前正在运行的任务会自动接着跑（`MANUS_RESUME_TASKS`）
 
 ## 快速开始
 
@@ -157,6 +152,10 @@ cd frontend && npm install && npm run build && cd ..
 
 ```bash
 docker build -t manus-sandbox:latest sandbox/
+# 网络慢时可指定镜像源（均可选）：
+#   --build-arg APT_MIRROR=mirrors.huaweicloud.com
+#   --build-arg PIP_INDEX_URL=https://mirrors.huaweicloud.com/repository/pypi/simple
+#   --build-arg PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
 cd backend && uv sync && uv run uvicorn app.main:app --port 8000
 ```
 
@@ -199,7 +198,7 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 | `MANUS_SANDBOX_MEMORY` / `MANUS_SANDBOX_CPUS` | `4g` / `2` | 容器资源限制 |
 | `MANUS_SANDBOX_IDLE_MINUTES` | `15` | 空闲多久后停止，`0` 关闭回收 |
 | `MANUS_SANDBOX_TZ` | 服务器时区 | 沙箱时区（POSIX TZ，例如 `<+08>-8`） |
-| `MANUS_SITES_DOMAIN` | `PUBLIC_BASE_URL` 的主机 | 已发布站点的域名后缀，需泛解析到本服务 |
+| `MANUS_SITES_DOMAIN` | `MANUS_PUBLIC_URL` 的主机 | 已发布站点的域名后缀，需泛解析到本服务 |
 
 ### Agent 行为
 
@@ -228,7 +227,7 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 
 ## 使用
 
-- **Web 界面**：打开首页输入任务即可；输入框的「+」菜单可指定技能、运行位置、执行前确认计划
+- **Web 界面**：打开首页输入任务即可；输入框的「+」菜单可指定技能、运行位置、执行前确认计划；旁边的连接器菜单可查看电话和邮箱、切换到「我的浏览器」，按个人开关单个连接器或接入插件
 - **飞书机器人**：把飞书应用的事件订阅地址设为 `/api/integrations/feishu/events`（订阅 `im.message.receive_v1`）
 - **API**：
 
@@ -273,6 +272,7 @@ backend/
     main.py         应用入口：启动与关闭、中间件（登录、站点域名、缓存）、挂载路由
     routes/         HTTP + WebSocket 路由，按功能分模块（任务、实时事件流、自动化、账户……）
     storage.py      持久化：data/manus.db（SQLite）和原子写文件
+    config.py       环境变量配置
     session.py      会话：事件日志、LLM 历史、计划、收件箱、追问建议
     agent.py        Agent 循环、工具分发、可恢复压缩、Wide Research
     llm.py          模型客户端（Anthropic 块格式 ↔ OpenAI chat 格式）
