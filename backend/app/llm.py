@@ -347,22 +347,29 @@ async def _structured(name: str, system: str, schema: dict, content: str, profil
     ident = (p.provider, p.model)
     prompt = system + "\nReply with a single JSON object only, matching this JSON schema:\n" + json.dumps(schema)
     messages = [_system(prompt, p), {"role": "user", "content": content}]
+    async def call(fmt: dict | None):
+        extra = {"response_format": fmt} if fmt else {}
+        return await client(p).chat.completions.create(
+            messages=messages, max_tokens=4000, **extra, **_common(p, None))  # no reasoning: forced-tool JSON conflicts with thinking
+
     try:
         try:
-            fmt = ({"type": "json_object"} if ident in _no_json_schema
-                   else {"type": "json_schema", "json_schema": {"name": name, "schema": schema, "strict": True}})
-            resp = await client(p).chat.completions.create(
-                messages=messages, response_format=fmt, max_tokens=4000, **_common(p, None))  # no reasoning: forced-tool JSON conflicts with thinking
+            try:
+                resp = await call({"type": "json_object"} if ident in _no_json_schema
+                                  else {"type": "json_schema", "json_schema": {"name": name, "schema": schema, "strict": True}})
+            except openai.BadRequestError as e:
+                if ident in _no_json_schema:
+                    raise
+                # json_schema unsupported, or emulated by the gateway with a forced tool call that some models
+                # reject (e.g. "tool_choice is incompatible with thinking"): fall back to plain JSON mode
+                log.info("%s/%s rejected json_schema (%s)", *ident, str(e)[:120])
+                _no_json_schema.add(ident)
+                log.info("%s/%s rejects json_schema output; using json_object", *ident)
+                resp = await call({"type": "json_object"})
         except openai.BadRequestError as e:
-            if ident in _no_json_schema:
-                raise
-            # json_schema unsupported, or emulated by the gateway with a forced tool call that some models
-            # reject (e.g. "tool_choice is incompatible with thinking"): fall back to plain JSON mode
-            log.info("%s/%s rejected json_schema (%s)", *ident, str(e)[:120])
-            _no_json_schema.add(ident)
-            log.info("%s/%s rejects json_schema output; using json_object", *ident)
-            resp = await client(p).chat.completions.create(
-                messages=messages, response_format={"type": "json_object"}, max_tokens=4000, **_common(p, None))  # no reasoning: forced-tool JSON conflicts with thinking
+            # JSON mode refused too (DeepSeek: "response_format type is unavailable now"): the prompt already asks for JSON
+            log.info("%s/%s rejected json_object (%s); asking without response_format", *ident, str(e)[:120])
+            resp = await call(None)
     except openai.OpenAIError as e:
         log.warning("%s failed: %s", name, e)
         return None
