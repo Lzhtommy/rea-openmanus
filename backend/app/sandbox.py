@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import socket
@@ -16,6 +17,9 @@ import httpx
 from . import config
 
 log = logging.getLogger("manus.sandbox")
+# Containers are labelled with the data directory they belong to, so backends sharing a Docker host
+# (dev next to prod, two checkouts) only ever reclaim their own containers.
+INSTANCE = hashlib.sha1(str(config.DATA_DIR.resolve()).encode()).hexdigest()[:12]
 
 
 class SandboxError(Exception):
@@ -133,7 +137,7 @@ class SandboxManager:
                 await _run("docker", "start", name)
         else:
             await _run("docker", "run", "-d", "--name", name,
-                       "--label", "manus.sandbox=1",
+                       "--label", f"manus.sandbox={INSTANCE}",
                        "-p", "127.0.0.1::8080",
                        "--memory", self.specs.get(sid, {}).get("memory") or os.environ.get("MANUS_SANDBOX_MEMORY", "4g"),
                        "--cpus", self.specs.get(sid, {}).get("cpus") or os.environ.get("MANUS_SANDBOX_CPUS", "2"),
@@ -197,7 +201,7 @@ class SandboxManager:
         # containers left running by an earlier backend process, once they have been idle as long
         if config.SANDBOX_MODE == "docker" and now - self.started_at >= idle:
             try:
-                running = (await _run("docker", "ps", "--filter", "label=manus.sandbox=1", "--format", "{{.Names}}")).split()
+                running = (await _run("docker", "ps", "--filter", f"label=manus.sandbox={INSTANCE}", "--format", "{{.Names}}")).split()
             except SandboxError:
                 running = []
             for name in running:
