@@ -246,7 +246,9 @@ ROLE_DENY = {
 _RISKY_SHELL = [
     (r"\bgit\s+push\b", "推送代码到远程仓库"),
     (r"\b(npm|pnpm|yarn)\s+publish\b|\btwine\s+upload\b|\bdocker\s+push\b|\bgh\s+(release|repo|pr)\s+create\b", "发布到公共平台"),
-    (r"\bcurl\b[^|;&]*(\s-X\s*(POST|PUT|PATCH|DELETE)\b|\s(-d|--data\S*|-F|--form)\s)|\bwget\b[^|;&]*--post", "向外部服务发送数据"),
+    # curl -G turns -d / --data-urlencode into a GET query string: reading, not sending
+    (r"\bcurl\b[^|;&]*\s-X\s*(POST|PUT|PATCH|DELETE)\b|\bcurl\b(?![^|;&]*\s(-G|--get)(\s|$))[^|;&]*\s(-d|--data\S*|-F|--form)\s"
+     r"|\bwget\b[^|;&]*--post", "向外部服务发送数据"),
     (r"\b(ssh|scp|rsync|sftp)\s+\S*@", "连接远程服务器"),
     (r"\b(sendmail|mailx?|mutt)\b", "发送邮件"),
     (r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(/|~|\$HOME|/home/ubuntu)(\s|$)|\bmkfs\b|\bdd\s+if=.*\bof=/dev/", "删除大量文件或磁盘数据"),
