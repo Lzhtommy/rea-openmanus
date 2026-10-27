@@ -21,7 +21,7 @@ import time
 import uuid
 from datetime import datetime
 
-from . import config, providers
+from . import config, providers, storage
 from .agent import Agent, AgentHost
 from .prompts import WATCHER_BRIEF
 from .sandbox import manager
@@ -83,8 +83,7 @@ class Triggers:
         self.sem = asyncio.Semaphore(2)
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(list(self.items.values()), ensure_ascii=False, indent=1))
+        storage.write_json(self.path, list(self.items.values()))
 
     def view(self, t: dict) -> dict:
         v = {**t, "checking": t["id"] in self.checking}

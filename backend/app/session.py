@@ -17,18 +17,11 @@ import logging
 import time
 from pathlib import Path
 
-from . import agents as agents_mod, config, connectors, llm, personal, projects, providers, skills
+from . import agents as agents_mod, config, connectors, llm, personal, projects, providers, skills, storage
 from .agent import Agent, AgentHost, now_ms, render_plan, short_id
 from .sandbox import manager
 
 log = logging.getLogger("manus.session")
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    """Write via a temp file and rename, so a reader (or a crash) never sees a half-written file."""
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
 
 
 class Session(AgentHost):
@@ -97,13 +90,13 @@ class Session(AgentHost):
                 "model": self.model_selection, "shared": bool(self.share), "projectId": self.project_id, "usage": self.usage, "owner": self.owner}
 
     def persist(self) -> None:
-        _atomic_write(self.dir / "meta.json", json.dumps({**self.meta(), "envAnnounced": self.env_announced,
+        storage.write_text(self.dir / "meta.json", json.dumps({**self.meta(), "envAnnounced": self.env_announced,
                                                         "files": self.files, "share": self.share,
                                                         "mrCache": self.map_reduce_cache,
                                                         "projectAnnounced": self.project_announced,
                                                         "personalNote": self.personal_note, "skillsNote": self.skills_note,
                                                         "roleAnnounced": self.role_announced, "usage": self.usage}, ensure_ascii=False))
-        _atomic_write(self.dir / "messages.json", json.dumps(self.messages, ensure_ascii=False))
+        storage.write_text(self.dir / "messages.json", json.dumps(self.messages, ensure_ascii=False))
 
     @classmethod
     def load(cls, d: Path) -> "Session":

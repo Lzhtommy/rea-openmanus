@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import config
+from . import config, storage
 
 KINDS = ("website", "game", "app")
 MAX_FILES, MAX_BYTES = 800, 150 * 1024 * 1024
@@ -56,8 +56,7 @@ class Sites:
                 self.items = {}
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(list(self.items.values()), ensure_ascii=False, indent=1))
+        storage.write_json(self.path, list(self.items.values()))
 
     def url(self, s: dict) -> str:
         scheme = urlparse(config.PUBLIC_BASE_URL).scheme or "http"

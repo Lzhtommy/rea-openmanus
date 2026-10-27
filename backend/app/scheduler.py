@@ -14,7 +14,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
-from . import config
+from . import config, storage
 
 log = logging.getLogger("manus.scheduler")
 
@@ -105,8 +105,7 @@ class Scheduler:
         self.task: asyncio.Task | None = None
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(list(self.items.values()), ensure_ascii=False, indent=1))
+        storage.write_json(self.path, list(self.items.values()))
 
     def view(self, s: dict) -> dict:
         return {**s, "description": describe(s["schedule"])}

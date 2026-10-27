@@ -11,7 +11,7 @@ import json
 import secrets
 import time
 
-from . import config
+from . import config, storage
 
 
 class ApiKeys:
@@ -25,8 +25,7 @@ class ApiKeys:
                 self.items = {}
 
     def save(self) -> None:
-        self.path.write_text(json.dumps(list(self.items.values()), ensure_ascii=False, indent=1))
-        self.path.chmod(0o600)
+        storage.write_json(self.path, list(self.items.values()), private=True)
 
     @staticmethod
     def public(k: dict) -> dict:

@@ -19,7 +19,7 @@ import re
 import uuid
 from contextlib import AsyncExitStack
 
-from . import config
+from . import config, storage
 
 log = logging.getLogger("manus.connectors")
 
@@ -124,11 +124,7 @@ class Connectors:
         self.live: dict[str, Live] = {}
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(list(self.items.values()), ensure_ascii=False, indent=1))
-        os.chmod(tmp, 0o600)
-        tmp.replace(self.path)
+        storage.write_json(self.path, list(self.items.values()), private=True)
 
     # ---- config
     def validate(self, body: dict, prev: dict | None = None) -> dict:

@@ -12,7 +12,7 @@ import json
 import time
 import uuid
 
-from . import config
+from . import config, storage
 
 PROFILE_FIELDS = {"nickname": 40, "occupation": 60, "about": 2000}
 INSTRUCTIONS_MAX = 3000
@@ -35,9 +35,8 @@ class Personal:
                 pass
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps({"profile": self.profile, "instructions": self.instructions,
-                                         "knowledge": list(self.knowledge.values())}, ensure_ascii=False, indent=1))
+        storage.write_json(self.path, {"profile": self.profile, "instructions": self.instructions,
+                                       "knowledge": list(self.knowledge.values())})
 
     def view(self) -> dict:
         return {"profile": self.profile, "instructions": self.instructions,

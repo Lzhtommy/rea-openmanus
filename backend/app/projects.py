@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import config
+from . import config, storage
 
 
 def _safe(name: str) -> str:
@@ -32,8 +32,7 @@ class Projects:
                 self.items = {}
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(list(self.items.values()), ensure_ascii=False, indent=1))
+        storage.write_json(self.path, list(self.items.values()))
 
     def files_dir(self, pid: str) -> Path:
         d = self.root / pid / "files"

@@ -13,10 +13,9 @@ extras it supports so that strict APIs never receive gateway-only parameters.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 
-from . import config
+from . import config, storage
 
 # id -> label, default base URL, extras it accepts, suggested default model
 CATALOG: dict[str, dict] = {
@@ -74,11 +73,7 @@ class ProviderStore:
                 self.items = {}
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.items, ensure_ascii=False, indent=1))
-        os.chmod(tmp, 0o600)
-        tmp.replace(self.path)
+        storage.write_json(self.path, self.items, private=True)
 
     def set(self, pid: str, api_key: str, base_url: str = "", model: str = "") -> dict:
         if pid not in CATALOG or pid == "litellm":

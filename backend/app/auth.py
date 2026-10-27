@@ -20,7 +20,7 @@ import time
 
 import httpx
 
-from . import config
+from . import config, storage
 
 COOKIE = "om_session"
 TTL = 30 * 24 * 3600
@@ -56,9 +56,7 @@ class Users:
                 self.items = {}
         key = config.DATA_DIR / "secret.key"
         if not key.exists():
-            key.parent.mkdir(parents=True, exist_ok=True)
-            key.write_bytes(secrets.token_bytes(32))
-            key.chmod(0o600)
+            storage.write_bytes(key, secrets.token_bytes(32), private=True)
         self.secret = key.read_bytes()
 
     @property
@@ -66,8 +64,7 @@ class Users:
         return bool(self.items) and os.environ.get("MANUS_AUTH", "on") != "off"
 
     def save(self) -> None:
-        self.path.write_text(json.dumps(list(self.items.values()), ensure_ascii=False, indent=1))
-        self.path.chmod(0o600)
+        storage.write_json(self.path, list(self.items.values()), private=True)
 
     @staticmethod
     def public(u: dict) -> dict:

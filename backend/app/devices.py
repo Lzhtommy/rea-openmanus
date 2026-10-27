@@ -18,7 +18,7 @@ import time
 
 import httpx
 
-from . import config
+from . import config, storage
 
 TIMEOUT = 660
 
@@ -91,9 +91,7 @@ class Devices:
         self.live: dict[str, Live] = {}
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(list(self.items.values()), ensure_ascii=False, indent=1))
-        self.path.chmod(0o600)
+        storage.write_json(self.path, list(self.items.values()), private=True)
 
     def view(self, d: dict) -> dict:
         live = self.live.get(d["id"])

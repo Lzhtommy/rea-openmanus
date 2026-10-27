@@ -14,7 +14,7 @@ import logging
 import secrets
 import time
 
-from . import config
+from . import config, storage
 from .sandbox import SandboxError, manager
 
 log = logging.getLogger("manus.computers")
@@ -68,8 +68,7 @@ class Computers:
                 c["status"] = "stopped"  # the backend restarted mid-way
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(list(self.items.values()), ensure_ascii=False, indent=1))
+        storage.write_json(self.path, list(self.items.values()))
 
     def _register(self, c: dict) -> None:
         manager.specs[sandbox_id(c["id"])] = {"memory": f"{c['memory']}g", "cpus": str(c["cpus"]),

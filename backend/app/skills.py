@@ -25,7 +25,7 @@ from pathlib import Path
 
 import httpx
 
-from . import config
+from . import config, storage
 from .sandbox import Sandbox
 
 log = logging.getLogger("manus.skills")
@@ -126,8 +126,7 @@ class Skills:
         self.reload()
 
     def save(self) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(json.dumps(self.state, ensure_ascii=False, indent=1))
+        storage.write_json(self.state_path, self.state)
 
     def _load_dir(self, d: Path, source: str) -> Skill | None:
         f = d / "SKILL.md"

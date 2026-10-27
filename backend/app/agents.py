@@ -12,7 +12,7 @@ import json
 import secrets
 import time
 
-from . import config
+from . import config, storage
 
 COLORS = ["#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626", "#0891b2", "#db2777", "#4b5563"]
 
@@ -35,9 +35,7 @@ class Agents:
                 pass
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps({"agents": list(self.agents.values()), "teams": list(self.teams.values())},
-                                        ensure_ascii=False, indent=1))
+        storage.write_json(self.path, {"agents": list(self.agents.values()), "teams": list(self.teams.values())})
 
     def view(self) -> dict:
         key = lambda x: -x["createdAt"]  # noqa: E731
