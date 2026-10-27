@@ -312,7 +312,8 @@ body.pc-full #main { display: none; }
 .cc-reason span { display: block; font-size: 13px; color: var(--text-tertiary); margin-top: 2px; }
 .cc-cmd { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--bg-code); font: 12px/18px var(--font-mono); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto; }
 .cc-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border-main); background: var(--bg-card); }
-.btn { height: 32px; padding: 0 14px; border-radius: 8px; font-size: 14px; font-weight: 500; }
+.btn { height: 32px; padding: 0 14px; border-radius: 8px; font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+.btn svg.i { width: 16px; height: 16px; }
 .btn.primary { background: var(--send-bg); color: var(--send-icon); }
 .btn.ghost { border: 1px solid var(--border-dark); background: var(--bg-white); }
 .btn:disabled { opacity: .45; cursor: default; }
@@ -458,10 +459,19 @@ body.pc-full #main { display: none; }
 .sched-card { width: min(520px, 100%); background: var(--bg-white); border-radius: 16px; box-shadow: 0 24px 64px var(--shadow-l); overflow: hidden; }
 #sched-form-title { font-size: 16px; font-weight: 500; }
 .sched-body { padding: 16px 18px 6px; display: flex; flex-direction: column; gap: 12px; }
-.sched-body label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); flex: 1; }
+.sched-body label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); flex: 1; min-width: 0; }
 .sched-body input, .sched-body textarea, .sched-body select { font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-dark); background: var(--bg-white); color: var(--text-primary); outline: none; resize: vertical; }
 .sched-body input:focus, .sched-body textarea:focus, .sched-body select:focus { border-color: var(--border-input-active); }
 .sched-row { display: flex; gap: 12px; }
+.icon-pick { position: relative; }
+.icon-pick-btn { width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--border-dark); background: var(--bg-white); font-size: 20px; display: flex; align-items: center; justify-content: center; }
+.icon-pick-btn:hover { background: var(--fill-hover); }
+.icon-pick-btn.empty { color: var(--text-tertiary); }
+.icon-pick-pop { position: absolute; top: 44px; left: 0; z-index: 5; width: 232px; padding: 8px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; background: var(--bg-white); border: 1px solid var(--border-main); border-radius: 10px; box-shadow: 0 8px 24px var(--shadow-m); }
+.icon-pick-pop button { height: 32px; border-radius: 6px; font-size: 18px; display: flex; align-items: center; justify-content: center; }
+.icon-pick-pop button:hover { background: var(--fill-hover); }
+.icon-pick-pop button.on { background: var(--fill-dark); }
+.icon-pick-pop button.none { font-size: 12px; color: var(--text-secondary); }
 .sched-err { color: var(--error); font-size: 13px; min-height: 18px; }
 
 /* ------------------------------------------------------------------ connectors */

@@ -5,6 +5,23 @@ import { AgAvatar, Icon, cx, errText, jfetch } from "../lib/util";
 import { focusInput, goHome, loadAgents, loadSkills } from "../actions";
 
 const MODE_ZH: Dict = { max: "Max", standard: "标准", lite: "Lite" };
+const AG_ICONS = ["🔍", "📊", "✍️", "💻", "🧠", "📚", "🎨", "📈", "🧪", "🛠️", "📝", "🌐", "💼", "📣", "🤝", "🎯", "🗂️", "⚖️", "🧾", "🚀"];
+
+/** Pick an agent icon from a preset grid; submits as the hidden `icon` field. Empty = the name's first letter. */
+function IconPick({ value }: { value: string }) {
+  const [icon, setIcon] = useState(value), [open, setOpen] = useState(false);
+  const pick = (x: string) => { setIcon(x); setOpen(false); };
+  return (
+    <div className="icon-pick">
+      <input type="hidden" name="icon" value={icon} />
+      <button type="button" className={cx("icon-pick-btn", !icon && "empty")} title="选择图标" onClick={() => setOpen(!open)}>{icon || <Icon name="plus" />}</button>
+      {open ? <div className="icon-pick-pop">
+        {AG_ICONS.map((x) => <button type="button" key={x} className={cx(x === icon && "on")} onClick={() => pick(x)}>{x}</button>)}
+        <button type="button" className={cx("none", !icon && "on")} title="不用图标（显示名称首字）" onClick={() => pick("")}>无</button>
+      </div> : null}
+    </div>
+  );
+}
 
 export function Agents() {
   useStore();
@@ -77,7 +94,7 @@ function AgForm({ kind, item }: { kind: "agent" | "team"; item?: Dict }) {
         <div className="viewer-head"><div className="viewer-title"><div id="ag-form-title" style={{ fontSize: 16, fontWeight: 500 }}>{title}</div></div><button type="button" className="icon-btn" id="ag-close" onClick={close}><Icon name="x" /></button></div>
         <div className="sched-body" id="ag-form-body">
           {kind === "agent" ? <>
-            <div className="sched-row"><label style={{ flex: "0 0 90px" }}>图标<input name="icon" maxLength={2} placeholder="🔍" defaultValue={v.icon || ""} /></label><label>名称<input name="name" placeholder="例如：行业研究员" defaultValue={v.name || ""} /></label></div>
+            <div className="sched-row"><label style={{ flex: "none" }}>图标<IconPick value={v.icon || ""} /></label><label>名称<input name="name" placeholder="例如：行业研究员" defaultValue={v.name || ""} /></label></div>
             <label>一句话介绍（团队负责人据此分派任务）<input name="description" placeholder="擅长检索一手资料、核实数据" defaultValue={v.description || ""} /></label>
             <label>职责与工作要求<textarea name="instructions" rows={6} placeholder="你是……；工作时要……；交付物格式……" defaultValue={v.instructions || ""}></textarea></label>
             <label>默认模式<select name="mode" defaultValue={v.mode || ""}><option value="">跟随当前选择</option><option value="max">Max</option><option value="standard">标准</option><option value="lite">Lite</option></select></label>
