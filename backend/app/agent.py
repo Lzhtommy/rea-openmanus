@@ -92,6 +92,7 @@ class Agent:
         self.result: str | None = None  # sub-agent deliverable
         self.plan_step_id: str | None = None
         self.opened = False  # first user-facing message of a run is the "opening" delivery
+        self.delivered = False  # a "result" delivery went out this run
         self._delta_at: dict[str, float] = {}
 
     # ------------------------------------------------------------ loop ---
@@ -264,6 +265,8 @@ class Agent:
                 outcome = ToolOutcome(f"Error: {type(e).__name__}: {e}", is_error=True)
 
         outcome.content = await self._compress(tool_id, outcome.content)
+        if outcome.is_error and not outcome.detail and isinstance(outcome.content, str):  # show the UI why it failed
+            outcome.detail = {"error": outcome.content[:1000]}
         if not silent:
             await self.host.emit({**base, "id": action_id, "status": "error" if outcome.is_error else "success",
                                   "detail": outcome.detail})
@@ -318,6 +321,7 @@ class Agent:
         if name == "message_notify_user":
             kind = a.get("kind") or ("progress" if self.opened else "opening")
             self.opened = True
+            self.delivered = self.delivered or kind == "result"
             await host.emit({"type": "chat", "sender": "assistant", "messageType": "text", "content": a["text"],
                              "attachments": self._attachments(a.get("attachments")), "deliveryKind": kind,
                              "streamId": action_id})
@@ -595,6 +599,10 @@ class Agent:
         if name == "idle":
             if self.role != "main":
                 self.result = a.get("result") or "(sub-agent returned no result)"
+            elif (a.get("result") or "").strip() and not self.delivered:
+                # the model put its answer in idle instead of message_notify_user: don't let it vanish
+                await host.emit({"type": "chat", "sender": "assistant", "messageType": "text", "content": a["result"].strip(),
+                                 "attachments": [], "deliveryKind": "result", "streamId": action_id})
             return ToolOutcome("Entered standby.", stop=True)
 
         return ToolOutcome(f"Tool {name} is not implemented.", is_error=True)

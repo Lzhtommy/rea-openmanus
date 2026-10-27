@@ -376,6 +376,7 @@ class Session(AgentHost):
         elif self.task and not self.task.done():
             self.inbox.append(full)
         else:
+            self.status = "running"  # right away, so an API caller polling after this doesn't read the previous run as done
             self.task = asyncio.create_task(self._run(full))
 
     async def stop(self) -> None:
