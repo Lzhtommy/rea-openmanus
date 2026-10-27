@@ -142,7 +142,8 @@ class Session(AgentHost):
         if (d / "messages.json").exists():
             s.messages = json.loads((d / "messages.json").read_text())
         if (d / "events.jsonl").exists():
-            s.events = [json.loads(l) for l in (d / "events.jsonl").read_text().splitlines() if l.strip()]
+            # split on "\n" only: splitlines() also breaks at \x85, \u2028, ... which events keep unescaped
+            s.events = [json.loads(l) for l in (d / "events.jsonl").read_text().split("\n") if l.strip()]
         return s
 
     # ------------------------------------------------------------ events ---

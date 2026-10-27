@@ -1308,3 +1308,14 @@ async def test_resume_limits(store, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "RESUME_TASKS", True)
     assert await session_mod.SessionStore().resume_interrupted() == [fresh] and started == [fresh]
     assert looping and old
+
+
+@pytest.mark.asyncio
+async def test_event_log_with_unicode_line_breaks(store, monkeypatch, tmp_path):
+    """Events whose text holds \x85 / \u2028 (e.g. binary file content) still load: the log is split on \n only."""
+    monkeypatch.setattr(config, "SESSIONS_DIR", tmp_path / "sessions")
+    s = session_mod.SessionStore().create()
+    await s.emit({"type": "chat", "sender": "assistant", "content": "a\x85b\u2028c\x1cd"})
+    s.persist()
+    loaded = session_mod.SessionStore().get(s.session_id)
+    assert loaded and loaded.events[-1]["content"] == "a\x85b\u2028c\x1cd"
