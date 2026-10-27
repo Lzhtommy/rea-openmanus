@@ -1,6 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+// vite.config.ts runs under Node, but the project only ships browser types.
+declare const process: { env: Record<string, string | undefined> };
+
 // `npm run dev` serves the UI with hot reload and forwards the API (HTTP + WebSockets) to a running backend.
 const backend = process.env.OPENMANUS_BACKEND || "http://127.0.0.1:8000";
 const proxy = { target: backend, changeOrigin: false, ws: true };
