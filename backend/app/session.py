@@ -266,6 +266,9 @@ class Session(AgentHost):
         return await sites.store.publish(sandbox, self.session_id, a["path"], a.get("title", ""), a.get("kind") or "website",
                                          a.get("description") or "", owner=self.owner)
 
+    def connectors_off(self) -> set[str]:
+        return set(personal.of(self.owner).connectors_off) if personal.store else set()
+
     def add_usage(self, model: str, usage: dict, tool_calls: int) -> None:
         u = self.usage
         u["llmCalls"] += 1
@@ -467,7 +470,7 @@ class Session(AgentHost):
                 system_notes.append(note or "<user_profile>\nThe user cleared their profile, instructions and knowledge; "
                                     "disregard what was said about them earlier.\n</user_profile>")
                 self.personal_note = note
-            if connectors.manager and (summary := connectors.manager.summary()) != self.connectors_note:
+            if connectors.manager and (summary := connectors.manager.summary(self.connectors_off())) != self.connectors_note:
                 system_notes.append(summary or "<connectors>\nNo MCP servers are connected now.\n</connectors>")
                 self.connectors_note = summary
             if profile.planner and not resume:

@@ -432,6 +432,41 @@ async def test_mcp_connector(store, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_mcp_connector_switched_off(store, monkeypatch, tmp_path):
+    """A connector the user switched off in the composer menu is invisible to their tasks: not told, not found, not called."""
+    import sys
+    from app import connectors, personal
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(personal, "store", personal.Personal())
+    connectors.manager = connectors.Connectors()
+    notes = tmp_path / "notes.txt"
+    info = await connectors.manager.upsert({"name": "Demo Notes", "transport": "stdio", "command": sys.executable,
+                                            "args": [os.path.join(os.path.dirname(__file__), "mcp_demo_server.py")],
+                                            "env": {"DEMO_NOTES": str(notes)}})
+    assert info["status"] == "connected", info
+    assert personal.store.update({"connectorsOff": [info["id"]]})["connectorsOff"] == [info["id"]]
+    assert personal.Personal().connectors_off == [info["id"]]  # saved
+    model = ScriptedModel([
+        msg(tool("mcp_search_tools", query="save note")),
+        msg(tool("mcp_call_tool", tool="demo_notes.save_note", arguments={"text": "should not be saved"})),
+        msg(tool("idle")),
+    ])
+    monkeypatch.setattr(llm, "agent_step", model)
+    s = store.create()
+    await s.user_message("use the notes tools", [])
+    await wait_status(s, {"idle"})
+    assert not any(e.get("status") == "need_confirm" for e in s.events)  # never asked about a tool it cannot use
+    results = [b["content"] for m in s.messages if m["role"] == "user" and isinstance(m["content"], list)
+               for b in m["content"] if b.get("type") == "tool_result"]
+    assert "No matching tools" in results[0] and "Unknown MCP tool" in results[1]
+    assert not notes.exists()
+    assert not any("<connectors>" in m["content"] for m in s.messages if m["role"] == "system")
+    assert connectors.manager.search("save note")  # still there for everyone else
+    await connectors.manager.stop_all()
+    connectors.manager = None
+
+
+@pytest.mark.asyncio
 async def test_share_link(store):
     """A share link exposes the task read-only, with file access scoped to that task, until revoked."""
     import json as _json

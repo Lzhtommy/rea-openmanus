@@ -589,6 +589,34 @@ textarea.code-edit { font: 13px/20px var(--font-mono); min-height: 52vh; }
 .skill-pick .mode-item { padding: 7px 10px; font-size: 13px; gap: 8px; }
 .skill-pick .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-pick .muted { font-size: 11px; }
+/* connector menu (the plug button next to "+") */
+.round-btn.on { background: var(--fill-light); color: var(--text-primary); }
+.more-menu.conn-menu { width: 320px; padding: 6px; }
+.conn-menu .cm-list { overflow: auto; }
+.conn-menu .mode-item { padding: 8px 10px; gap: 10px; cursor: default; }
+.conn-menu button.mode-item { cursor: pointer; }
+.conn-menu .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-menu .plug-logo { width: 20px; height: 20px; border-radius: 6px; font-size: 11px; }
+.conn-menu .plug-logo.custom { background: var(--fill-light); color: var(--text-secondary); }
+.conn-menu .plug-logo.custom svg.i { width: 13px; height: 13px; }
+.conn-menu .switch:disabled { opacity: .5; cursor: not-allowed; }
+.cm-link { flex: none; font-size: 13px; color: var(--text-secondary); padding: 2px 4px; border-radius: 6px; cursor: pointer; }
+.cm-link:hover { color: var(--text-primary); background: var(--fill-hover); }
+.cm-tag { flex: none; font-size: 12px; color: var(--text-tertiary); }
+.cm-tag.err { color: var(--error); }
+.cm-sub { margin: 0 10px 4px 36px; padding: 8px 10px; border-radius: 8px; background: var(--fill-light); font-size: 12px; line-height: 1.5; word-break: break-all; }
+.cm-sub b { font-weight: 500; color: var(--text-primary); }
+.conn-menu .cm-foot { border-top: 1px solid var(--border-main); margin-top: 4px; padding-top: 10px; border-radius: 0 0 10px 10px; }
+.cm-logos { display: inline-flex; align-items: center; }
+.cm-logos .plug-logo { width: 18px; height: 18px; font-size: 10px; margin-left: -4px; box-shadow: 0 0 0 2px var(--bg-white); }
+.cm-more { margin-left: 4px; font-size: 11px; color: var(--text-tertiary); padding: 1px 6px; border-radius: 999px; background: var(--fill-light); }
+/* phones: span the composer instead of hanging off the button */
+@media (max-width: 480px) {
+  #composer .conn-wrap { position: static; }
+  .more-menu.conn-menu { left: 0; right: 0; width: auto; }
+  .more-menu.conn-menu.up { bottom: calc(100% + 6px); }
+  .more-menu.conn-menu:not(.up) { top: calc(100% + 6px); }
+}
 .fc-head .btn.sm { flex: none; }
 #sk-err:empty { display: none; }
 

@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Collection
 from contextlib import AsyncExitStack
 
 from . import config, storage
@@ -200,41 +201,46 @@ class Connectors:
         self.live.clear()
 
     # ---- what the agent sees
-    def catalog(self) -> list[tuple[dict, object]]:
-        return [(lv.cfg, t) for lv in self.live.values() if lv.status == "connected" for t in lv.tools]
+    # off: ids of connectors the task's user switched off for their tasks (personal.connectors_off)
+    def _usable(self, off: Collection[str] = ()) -> list[Live]:
+        return [lv for lv in self.live.values() if lv.status == "connected" and lv.cfg["id"] not in off]
 
-    def summary(self) -> str:
+    def catalog(self, off: Collection[str] = ()) -> list[tuple[dict, object]]:
+        return [(lv.cfg, t) for lv in self._usable(off) for t in lv.tools]
+
+    def summary(self, off: Collection[str] = ()) -> str:
         rows = [f"- {lv.cfg['name']} ({len(lv.tools)} tools){': ' + lv.cfg['description'] if lv.cfg.get('description') else ''}"
-                for lv in self.live.values() if lv.status == "connected"]
+                for lv in self._usable(off)]
         return ("<connectors>\nConnected MCP servers. Find their tools with mcp_search_tools, run them with mcp_call_tool.\n"
                 + "\n".join(rows) + "\n</connectors>") if rows else ""
 
-    def search(self, query: str, limit: int = 8) -> list[dict]:
+    def search(self, query: str, limit: int = 8, off: Collection[str] = ()) -> list[dict]:
         words = [w for w in re.split(r"\W+", query.lower()) if w]
         scored = []
-        for cfg, t in self.catalog():
+        catalog = self.catalog(off)
+        for cfg, t in catalog:
             hay = f"{cfg['name']} {cfg.get('description', '')} {t.name} {t.title or ''} {t.description or ''}".lower()
             score = sum(hay.count(w) + (3 if w in t.name.lower() else 0) for w in words) if words else 1
             if score:
                 scored.append((score, cfg, t))
-        if not scored and len(self.catalog()) <= 40:  # e.g. a Chinese query vs English tool names: show everything
-            scored = [(1, cfg, t) for cfg, t in self.catalog()]
+        if not scored and len(catalog) <= 40:  # e.g. a Chinese query vs English tool names: show everything
+            scored = [(1, cfg, t) for cfg, t in catalog]
         scored.sort(key=lambda x: -x[0])
         return [{"tool": f"{cfg['slug']}.{t.name}", "server": cfg["name"], "description": t.description or "",
                  "input_schema": t.input_schema, "read_only": bool(t.annotations and t.annotations.read_only_hint)}
                 for _, cfg, t in scored[:limit]]
 
-    def find(self, qualified: str) -> tuple[Live, object] | None:
+    def find(self, qualified: str, off: Collection[str] = ()) -> tuple[Live, object] | None:
         server, _, name = qualified.partition(".")
-        for lv in self.live.values():
-            if lv.cfg["slug"] == server and lv.status == "connected":
+        for lv in self._usable(off):
+            if lv.cfg["slug"] == server:
                 for t in lv.tools:
                     if t.name == name:
                         return lv, t
         return None
 
-    async def call(self, qualified: str, arguments: dict) -> tuple[str, bool]:
-        found = self.find(qualified)
+    async def call(self, qualified: str, arguments: dict, off: Collection[str] = ()) -> tuple[str, bool]:
+        found = self.find(qualified, off)
         if not found:
             return f"Unknown MCP tool '{qualified}'. Use mcp_search_tools to find available tools.", True
         lv, t = found
@@ -249,9 +255,9 @@ class Connectors:
             parts.append(json.dumps(r.structured_content, ensure_ascii=False))
         return "\n".join(parts) or "(no output)", bool(getattr(r, "is_error", False))
 
-    def needs_confirm(self, qualified: str) -> str | None:
+    def needs_confirm(self, qualified: str, off: Collection[str] = ()) -> str | None:
         """Tools not marked read-only may change things outside: ask, unless the connector is trusted."""
-        found = self.find(qualified)
+        found = self.find(qualified, off)
         if not found:
             return None
         lv, t = found

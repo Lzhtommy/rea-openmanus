@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
-from . import agents, apikeys, auth, computers, mail, config, connectors, devices, recordings, media, personal, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import agents, apikeys, auth, computers, mail, config, connectors, devices, recordings, media, personal, phone, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
 from .sandbox import manager
 from .routes import ROUTERS
 from .routes.common import proxy_port, serve_site
@@ -108,7 +108,8 @@ async def site_hosts(request: Request, call_next):
 @app.get("/api/config")
 async def get_config():
     return {"model": providers.default_model(), "defaultMode": config.DEFAULT_MODE, "sandbox": config.SANDBOX_MODE, "planner": config.PLANNER_ENABLED,
-            "search": "tavily" if config.TAVILY_API_KEY else "duckduckgo", "mail": mail.CFG["ADDRESS"] or (mail.CFG["USER"] if mail.enabled() else ""), "media": media.capabilities()}
+            "search": "tavily" if config.TAVILY_API_KEY else "duckduckgo", "mail": mail.CFG["ADDRESS"] or (mail.CFG["USER"] if mail.enabled() else ""),
+            "phone": phone.CFG["NUMBER"] if phone.enabled() else "", "media": media.capabilities()}
 
 @app.middleware("http")
 async def no_cache_static(request: Request, call_next):

@@ -31,6 +31,7 @@ function onDocClick(e: MouseEvent) {
   const inside = (sel: string) => !!t.closest?.(sel);
   const m = S.menus, before = JSON.stringify(m) + S.planOpen;
   if (m.plus && !inside("#plus-menu, #plus-btn")) { m.plus = false; m.skillPick = false; m.targetPick = false; }
+  if (m.conn && !inside("#conn-menu, #conn-btn, #plug-modal, #conn-modal")) m.conn = false;
   if (m.mode && !inside("#mode-menu, #mode-btn")) m.mode = false;
   if (m.more && !inside(".more-wrap")) m.more = false;
   if (m.skCreate && !inside("#sk-create, #sk-create-menu")) m.skCreate = false;

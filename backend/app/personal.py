@@ -24,21 +24,23 @@ class Personal:
         self.profile: dict[str, str] = {k: "" for k in PROFILE_FIELDS}
         self.instructions = ""
         self.knowledge: dict[str, dict] = {}
+        self.connectors_off: list[str] = []  # connector ids this user switched off for their tasks (composer menu)
         if (d := storage.load_doc(self.path)) is not None:
             try:
                 self.profile.update({k: str(v) for k, v in (d.get("profile") or {}).items() if k in PROFILE_FIELDS})
                 self.instructions = str(d.get("instructions") or "")
                 self.knowledge = {k["id"]: k for k in d.get("knowledge") or []}
+                self.connectors_off = [str(x) for x in d.get("connectorsOff") or []]
             except (AttributeError, KeyError, TypeError):
                 pass
 
     def save(self) -> None:
         storage.save_doc(self.path, {"profile": self.profile, "instructions": self.instructions,
-                                     "knowledge": list(self.knowledge.values())})
+                                     "knowledge": list(self.knowledge.values()), "connectorsOff": self.connectors_off})
 
     def view(self) -> dict:
         return {"profile": self.profile, "instructions": self.instructions,
-                "knowledge": sorted(self.knowledge.values(), key=lambda k: -k["createdAt"])}
+                "knowledge": sorted(self.knowledge.values(), key=lambda k: -k["createdAt"]), "connectorsOff": self.connectors_off}
 
     def update(self, body: dict) -> dict:
         for k, limit in PROFILE_FIELDS.items():
@@ -46,6 +48,8 @@ class Personal:
                 self.profile[k] = str(body["profile"][k] or "").strip()[:limit]
         if "instructions" in body:
             self.instructions = str(body["instructions"] or "").strip()[:INSTRUCTIONS_MAX]
+        if isinstance(body.get("connectorsOff"), list):
+            self.connectors_off = sorted({str(x) for x in body["connectorsOff"]})[:200]
         self.save()
         return self.view()
 

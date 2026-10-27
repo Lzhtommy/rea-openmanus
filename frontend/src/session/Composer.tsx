@@ -1,7 +1,8 @@
-// The task input: attachments and run-location chips, the "+" menu, send / stop / queue.
+// The task input: attachments and run-location chips, the "+" and connector menus, send / stop / queue.
 import { useEffect, useLayoutEffect, useRef, type ChangeEvent, type KeyboardEvent } from "react";
 import { S, render, ui, type Dict } from "../store";
 import { Icon, PC_ST, cx } from "../lib/util";
+import { ConnMenu, openConnMenu } from "./ConnMenu";
 import { crewName, ensureSession, loadComputers, loadSkills, openComputers, openSkills, skillTitle, submit } from "../actions";
 
 /** Open the file picker of the composer's "添加文件". */
@@ -104,7 +105,7 @@ export function Composer({ placeholder }: { placeholder?: string }) {
       <div className="composer-bar">
         <div className="more-wrap up">
           <button type="button" className="round-btn" id="plus-btn" title="添加"
-            onClick={() => { S.menus.plus = !S.menus.plus; S.menus.skillPick = false; render(); }}><span><Icon name="plus" /></span></button>
+            onClick={() => { S.menus.plus = !S.menus.plus; S.menus.skillPick = false; S.menus.conn = false; render(); }}><span><Icon name="plus" /></span></button>
           <div className={cx("more-menu up", !S.menus.plus && "hidden")} id="plus-menu">
             <label className="mode-item"><span><Icon name="paperclip" /></span>添加文件<input id="file-input" type="file" multiple hidden onChange={onFiles} /></label>
             <button type="button" className="mode-item" id="plus-skills" onClick={async () => { await loadSkills(); S.menus.skillPick = !S.menus.skillPick; render(); }}>
@@ -116,6 +117,10 @@ export function Composer({ placeholder }: { placeholder?: string }) {
             <label className="mode-item"><span><Icon name="list" /></span>执行前确认计划<span className="spacer"></span>
               <input type="checkbox" id="opt-confirm-plan" checked={S.confirmPlan} onChange={(e) => { S.confirmPlan = e.target.checked; render(); }} /></label>
           </div>
+        </div>
+        <div className="more-wrap up conn-wrap">
+          <button type="button" className={cx("round-btn", S.menus.conn && "on")} id="conn-btn" title="连接器" onClick={openConnMenu}><span><Icon name="plug" /></span></button>
+          <ConnMenu />
         </div>
         <span className="spacer"></span>
         <button type="button" className={cx("btn ghost sm", !(busy && hasText) && "hidden")} id="queue-btn" title="当前任务完成后再执行这条消息" onClick={() => submit(S.input, true)}>排队</button>

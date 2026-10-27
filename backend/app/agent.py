@@ -74,6 +74,7 @@ class AgentHost:
     def preview_url(self, port: int) -> str: return ""
     def persist(self) -> None: ...
     def add_usage(self, model: str, usage: dict, tool_calls: int) -> None: ...
+    def connectors_off(self) -> set[str]: return set()  # connector ids the user switched off for their tasks
 
 
 class Agent:
@@ -278,7 +279,7 @@ class Agent:
         if dev and not dev.get("autoApprove") and name in LOCAL_CONFIRM:  # Manus' confirm_local_terminal_execution
             reason = reason or LOCAL_CONFIRM[name]
         if name == "mcp_call_tool" and connectors.manager:
-            reason = connectors.manager.needs_confirm(str(args.get("tool", "")))
+            reason = connectors.manager.needs_confirm(str(args.get("tool", "")), self.host.connectors_off())
         if not config.CONFIRM_ENABLED or not reason:
             return True
         key = f"{name}:{args.get('port') or args.get('command') or args.get('input') or args.get('tool') or args.get('file')}"
@@ -490,16 +491,18 @@ class Agent:
 
         # ---- MCP connectors
         if name == "mcp_search_tools":
-            hits = connectors.manager.search(a["query"]) if connectors.manager else []
+            off = self.host.connectors_off()
+            hits = connectors.manager.search(a["query"], off=off) if connectors.manager else []
             text = json.dumps(hits, ensure_ascii=False, indent=1) if hits else (
-                "No matching tools." + ("" if connectors.manager and connectors.manager.catalog() else
+                "No matching tools." + ("" if connectors.manager and connectors.manager.catalog(off) else
                                        " No MCP server is connected; the user can add one under 连接器."))
             return ToolOutcome(text, {"mcp": {"server": "openmanus-tools", "primitive": "tool", "action": "search",
                                               "argumentsPreview": json.dumps({"query": a["query"]}, ensure_ascii=False),
                                               "resultPreview": "\n".join(f"{h['tool']} — {h['description'][:80]}" for h in hits) or text}})
         if name == "mcp_call_tool":
             tool, cargs = str(a["tool"]), a.get("arguments") if isinstance(a.get("arguments"), dict) else {}
-            text, err = await connectors.manager.call(tool, cargs) if connectors.manager else ("No MCP servers.", True)
+            text, err = (await connectors.manager.call(tool, cargs, self.host.connectors_off()) if connectors.manager
+                         else ("No MCP servers.", True))
             return ToolOutcome(text, {"mcp": {"server": tool.partition(".")[0], "primitive": "tool", "action": tool.partition(".")[2],
                                               "argumentsPreview": json.dumps(cargs, ensure_ascii=False, indent=1),
                                               "resultPreview": text[:4000]}}, is_error=err)

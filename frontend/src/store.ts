@@ -74,7 +74,7 @@ export const S = {
   auth: null as Dict | null, me: null as Dict | null, authScreen: false,
   // composer and chrome
   input: "", confirmPlan: false,
-  menus: { mode: false, plus: false, skillPick: false, targetPick: false, more: false, skCreate: false, autoNew: false },
+  menus: { mode: false, plus: false, skillPick: false, targetPick: false, conn: false, more: false, skCreate: false, autoNew: false },
   navSearch: false, navCollapsed: false, theme: "auto",
   // open dialogs: name -> the data it was opened with (`_k` remounts it on every open)
   modals: {} as Partial<Record<ModalName, Dict>>,

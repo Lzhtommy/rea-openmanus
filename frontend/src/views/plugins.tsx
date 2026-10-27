@@ -2,9 +2,9 @@
 import { useState, type FormEvent } from "react";
 import { S, render, useStore, openModal, closeModal, type Dict } from "../store";
 import { ConnSt, Icon, Spin, cx, jfetch } from "../lib/util";
-import { loadPlugins, openConnectors } from "../actions";
+import { loadConns, loadPlugins, openConnectors } from "../actions";
 
-function PlugLogo({ p, id }: { p: Dict; id?: string }) {
+export function PlugLogo({ p, id }: { p: Dict; id?: string }) {
   return <span className="plug-logo" id={id} style={{ background: p.color }}>{String(p.name).replace(/^[^\p{L}\p{N}]+/u, "").slice(0, 1).toUpperCase()}</span>;
 }
 
@@ -67,14 +67,14 @@ function PluginForm({ id }: { id: string }) {
     const r = await jfetch(`/api/plugins/${p.id}/install`, "POST", { values });
     setBusy(false);
     const j = await r.json().catch(() => ({}));
-    await loadPlugins();
+    await Promise.all([loadPlugins(), loadConns()]);  // the composer's connector menu lists connectors
     if (!r.ok) { setPlainLabel(true); setErr(j.detail || "连接失败"); return; }
     if (j.status === "error") { setPlainLabel(false); setErr(`已保存，但连接失败：${j.error}`); return; }
     closeModal("plug");
   };
   const remove = async () => {
     if (!c || !confirm(`断开「${p.name}」并删除其配置？`)) return;
-    await fetch(`/api/connectors/${c.id}`, { method: "DELETE" }); closeModal("plug"); loadPlugins();
+    await fetch(`/api/connectors/${c.id}`, { method: "DELETE" }); closeModal("plug"); loadPlugins(); loadConns();
   };
 
   return (
