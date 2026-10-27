@@ -4,7 +4,7 @@ A *mode* is a preset over the server's own endpoint (MANUS_LLM_PROVIDER, a LiteL
 which model, how much reasoning, whether the planner runs. *Flex* runs a task on any configured
 OpenAI-compatible provider with the user's own key. In a selection, provider "litellm" means the server's
 own endpoint, whichever provider that is.
-Keys are stored server-side in data/providers.json (0600) and never returned to the browser.
+Keys are stored server-side in data/manus.db (0600) and never returned to the browser.
 
 Providers differ in what they accept beyond the core chat-completions API; each one declares the
 extras it supports so that strict APIs never receive gateway-only parameters.
@@ -12,7 +12,6 @@ extras it supports so that strict APIs never receive gateway-only parameters.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 
 from . import config, storage
@@ -65,15 +64,10 @@ class Profile:
 class ProviderStore:
     def __init__(self):
         self.path = config.DATA_DIR / "providers.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = json.loads(self.path.read_text())
-            except ValueError:
-                self.items = {}
+        self.items: dict[str, dict] = storage.load_doc(self.path) or {}
 
     def save(self) -> None:
-        storage.write_json(self.path, self.items, private=True)
+        storage.save_doc(self.path, self.items)
 
     def set(self, pid: str, api_key: str, base_url: str = "", model: str = "") -> dict:
         if pid not in CATALOG or pid == "litellm":

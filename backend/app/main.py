@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from . import agents, apikeys, auth, computers, feishu_bot, mail, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod
+from . import agents, apikeys, auth, computers, feishu_bot, mail, config, connectors, devices, recordings, llm, media, personal, plugins, sites, projects, skills, triggers as triggers_mod, providers, scheduler as scheduler_mod, session as session_mod, storage
 from .sandbox import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -269,10 +269,9 @@ def _adopt_existing(uid: str) -> None:
             item.setdefault("owner", None)
             item["owner"] = item["owner"] or uid
         store.save()
-    legacy = config.DATA_DIR / "personal.json"
-    if legacy.exists() and not (config.DATA_DIR / f"personal-{uid}.json").exists():
-        import shutil
-        shutil.copy(legacy, config.DATA_DIR / f"personal-{uid}.json")
+    legacy, mine = config.DATA_DIR / "personal.json", config.DATA_DIR / f"personal-{uid}.json"
+    if (d := storage.load_doc(legacy)) is not None and storage.load_doc(mine) is None:
+        storage.save_doc(mine, d)
 
 
 def _session(sid: str):

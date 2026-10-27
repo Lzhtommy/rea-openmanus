@@ -5,7 +5,7 @@ are NOT added to the model's tool list: the agent calls mcp_search_tools to find
 full input schemas) and mcp_call_tool to run it, like Manus' `manus-tools` search. The static tool list
 keeps the prompt-cache prefix intact no matter how many connectors are configured.
 
-Config lives in data/connectors.json (0600: it can hold tokens). stdio servers run on the orchestrator
+Config lives in data/manus.db (0600: it can hold tokens). stdio servers run on the orchestrator
 host, not in a sandbox — only add commands you trust.
 """
 
@@ -115,16 +115,11 @@ class Live:
 class Connectors:
     def __init__(self):
         self.path = config.DATA_DIR / "connectors.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = {c["id"]: c for c in json.loads(self.path.read_text())}
-            except (ValueError, KeyError):
-                log.exception("unreadable %s", self.path)
+        self.items: dict[str, dict] = {c["id"]: c for c in storage.load_items(self.path)}
         self.live: dict[str, Live] = {}
 
     def save(self) -> None:
-        storage.write_json(self.path, list(self.items.values()), private=True)
+        storage.save_items(self.path, self.items.values())
 
     # ---- config
     def validate(self, body: dict, prev: dict | None = None) -> dict:

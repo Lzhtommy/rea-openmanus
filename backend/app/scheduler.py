@@ -2,13 +2,12 @@
 
 Frequencies: once (at a datetime), interval (every N minutes), daily (HH:MM), weekly (weekday + HH:MM),
 all in the server's local time. A background loop checks due schedules and starts each run as a
-fresh session tagged with the schedule id. Schedules live in data/schedules.json.
+fresh session tagged with the schedule id. Schedules live in data/manus.db.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 import uuid
@@ -96,16 +95,11 @@ class Scheduler:
     def __init__(self, store):
         self.store = store  # session store: runs become new sessions
         self.path = config.DATA_DIR / "schedules.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = {s["id"]: s for s in json.loads(self.path.read_text())}
-            except (ValueError, KeyError):
-                log.exception("unreadable %s", self.path)
+        self.items: dict[str, dict] = {s["id"]: s for s in storage.load_items(self.path)}
         self.task: asyncio.Task | None = None
 
     def save(self) -> None:
-        storage.write_json(self.path, list(self.items.values()))
+        storage.save_items(self.path, self.items.values())
 
     def view(self, s: dict) -> dict:
         return {**s, "description": describe(s["schedule"])}

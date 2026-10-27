@@ -82,16 +82,11 @@ class DeviceTransport(httpx.AsyncBaseTransport):
 class Devices:
     def __init__(self):
         self.path = config.DATA_DIR / "devices.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = {d["id"]: d for d in json.loads(self.path.read_text())}
-            except (ValueError, KeyError):
-                self.items = {}
+        self.items: dict[str, dict] = {d["id"]: d for d in storage.load_items(self.path)}
         self.live: dict[str, Live] = {}
 
     def save(self) -> None:
-        storage.write_json(self.path, list(self.items.values()), private=True)
+        storage.save_items(self.path, self.items.values())
 
     def view(self, d: dict) -> dict:
         live = self.live.get(d["id"])

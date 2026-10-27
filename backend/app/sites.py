@@ -11,7 +11,6 @@ call the API). Each site gets its own host, <slug>.<sites domain> (with localhos
 
 from __future__ import annotations
 
-import json
 import mimetypes
 import shlex
 import re
@@ -48,15 +47,10 @@ class Sites:
     def __init__(self):
         self.root = config.DATA_DIR / "sites"
         self.path = config.DATA_DIR / "sites.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = {s["id"]: s for s in json.loads(self.path.read_text())}
-            except (ValueError, KeyError):
-                self.items = {}
+        self.items: dict[str, dict] = {s["id"]: s for s in storage.load_items(self.path)}
 
     def save(self) -> None:
-        storage.write_json(self.path, list(self.items.values()))
+        storage.save_items(self.path, self.items.values())
 
     def url(self, s: dict) -> str:
         scheme = urlparse(config.PUBLIC_BASE_URL).scheme or "http"

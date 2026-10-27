@@ -8,7 +8,6 @@ to the agent at the start of a task as a system note, never folded into the cach
 
 from __future__ import annotations
 
-import json
 import time
 import uuid
 
@@ -25,18 +24,17 @@ class Personal:
         self.profile: dict[str, str] = {k: "" for k in PROFILE_FIELDS}
         self.instructions = ""
         self.knowledge: dict[str, dict] = {}
-        if self.path.exists():
+        if (d := storage.load_doc(self.path)) is not None:
             try:
-                d = json.loads(self.path.read_text())
                 self.profile.update({k: str(v) for k, v in (d.get("profile") or {}).items() if k in PROFILE_FIELDS})
                 self.instructions = str(d.get("instructions") or "")
                 self.knowledge = {k["id"]: k for k in d.get("knowledge") or []}
-            except (ValueError, KeyError, TypeError):
+            except (AttributeError, KeyError, TypeError):
                 pass
 
     def save(self) -> None:
-        storage.write_json(self.path, {"profile": self.profile, "instructions": self.instructions,
-                                       "knowledge": list(self.knowledge.values())})
+        storage.save_doc(self.path, {"profile": self.profile, "instructions": self.instructions,
+                                     "knowledge": list(self.knowledge.values())})
 
     def view(self) -> dict:
         return {"profile": self.profile, "instructions": self.instructions,

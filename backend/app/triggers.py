@@ -7,7 +7,7 @@
   a small read-only agent run in its own sandbox that looks the facts up, compares them with what it saw
   last time, and answers {met, summary, state}. Only when the condition is met does a full task start.
 
-Runs are ordinary sessions tagged with the trigger id. Triggers live in data/triggers.json.
+Runs are ordinary sessions tagged with the trigger id. Triggers live in data/manus.db.
 """
 
 from __future__ import annotations
@@ -72,18 +72,13 @@ class Triggers:
     def __init__(self, store):
         self.store = store  # session store: runs become new sessions
         self.path = config.DATA_DIR / "triggers.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = {t["id"]: t for t in json.loads(self.path.read_text())}
-            except (ValueError, KeyError):
-                log.exception("unreadable %s", self.path)
+        self.items: dict[str, dict] = {t["id"]: t for t in storage.load_items(self.path)}
         self.checking: set[str] = set()
         self.task: asyncio.Task | None = None
         self.sem = asyncio.Semaphore(2)
 
     def save(self) -> None:
-        storage.write_json(self.path, list(self.items.values()))
+        storage.save_items(self.path, self.items.values())
 
     def view(self, t: dict) -> dict:
         v = {**t, "checking": t["id"] in self.checking}

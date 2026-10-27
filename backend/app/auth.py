@@ -13,7 +13,6 @@ import base64
 import contextvars
 import hashlib
 import hmac
-import json
 import os
 import secrets
 import time
@@ -48,12 +47,7 @@ def _check(password: str, stored: str) -> bool:
 class Users:
     def __init__(self):
         self.path = config.DATA_DIR / "users.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = {u["id"]: u for u in json.loads(self.path.read_text())}
-            except (ValueError, KeyError):
-                self.items = {}
+        self.items: dict[str, dict] = {u["id"]: u for u in storage.load_items(self.path)}
         key = config.DATA_DIR / "secret.key"
         if not key.exists():
             storage.write_bytes(key, secrets.token_bytes(32), private=True)
@@ -64,7 +58,7 @@ class Users:
         return bool(self.items) and os.environ.get("MANUS_AUTH", "on") != "off"
 
     def save(self) -> None:
-        storage.write_json(self.path, list(self.items.values()), private=True)
+        storage.save_items(self.path, self.items.values())
 
     @staticmethod
     def public(u: dict) -> dict:

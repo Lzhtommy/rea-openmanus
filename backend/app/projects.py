@@ -6,7 +6,6 @@ Every task started in a project gets the project's instructions and a copy of it
 
 from __future__ import annotations
 
-import json
 import re
 import time
 import uuid
@@ -24,15 +23,10 @@ class Projects:
     def __init__(self):
         self.root = config.DATA_DIR / "projects"
         self.path = config.DATA_DIR / "projects.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = {p["id"]: p for p in json.loads(self.path.read_text())}
-            except (ValueError, KeyError):
-                self.items = {}
+        self.items: dict[str, dict] = {p["id"]: p for p in storage.load_items(self.path)}
 
     def save(self) -> None:
-        storage.write_json(self.path, list(self.items.values()))
+        storage.save_items(self.path, self.items.values())
 
     def files_dir(self, pid: str) -> Path:
         d = self.root / pid / "files"

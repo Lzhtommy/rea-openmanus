@@ -7,7 +7,6 @@ with it run as that user.
 from __future__ import annotations
 
 import hashlib
-import json
 import secrets
 import time
 
@@ -17,15 +16,10 @@ from . import config, storage
 class ApiKeys:
     def __init__(self):
         self.path = config.DATA_DIR / "api_keys.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = {k["id"]: k for k in json.loads(self.path.read_text())}
-            except (ValueError, KeyError):
-                self.items = {}
+        self.items: dict[str, dict] = {k["id"]: k for k in storage.load_items(self.path)}
 
     def save(self) -> None:
-        storage.write_json(self.path, list(self.items.values()), private=True)
+        storage.save_items(self.path, self.items.values())
 
     @staticmethod
     def public(k: dict) -> dict:

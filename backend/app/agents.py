@@ -8,11 +8,13 @@ a sub-agent with its own instructions in the same sandbox and reports back.
 
 from __future__ import annotations
 
-import json
+import logging
 import secrets
 import time
 
 from . import config, storage
+
+log = logging.getLogger("manus.agents")
 
 COLORS = ["#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626", "#0891b2", "#db2777", "#4b5563"]
 
@@ -26,16 +28,15 @@ class Agents:
         self.path = config.DATA_DIR / "agents.json"
         self.agents: dict[str, dict] = {}
         self.teams: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                d = json.loads(self.path.read_text())
-                self.agents = {a["id"]: a for a in d.get("agents", [])}
-                self.teams = {t["id"]: t for t in d.get("teams", [])}
-            except (ValueError, KeyError):
-                pass
+        d = storage.load_doc(self.path) or {}
+        try:
+            self.agents = {a["id"]: a for a in d.get("agents", [])}
+            self.teams = {t["id"]: t for t in d.get("teams", [])}
+        except (KeyError, TypeError):
+            log.exception("unreadable agents store")
 
     def save(self) -> None:
-        storage.write_json(self.path, {"agents": list(self.agents.values()), "teams": list(self.teams.values())})
+        storage.save_doc(self.path, {"agents": list(self.agents.values()), "teams": list(self.teams.values())})
 
     def view(self) -> dict:
         key = lambda x: -x["createdAt"]  # noqa: E731

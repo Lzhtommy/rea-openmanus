@@ -9,7 +9,6 @@ Ports the user opens get stable, isolated URLs (pc-<id>-<port>.<sites domain>).
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import secrets
 import time
@@ -55,12 +54,7 @@ def sandbox_id(cid: str) -> str:
 class Computers:
     def __init__(self):
         self.path = config.DATA_DIR / "computers.json"
-        self.items: dict[str, dict] = {}
-        if self.path.exists():
-            try:
-                self.items = {c["id"]: c for c in json.loads(self.path.read_text())}
-            except (ValueError, KeyError):
-                self.items = {}
+        self.items: dict[str, dict] = {c["id"]: c for c in storage.load_items(self.path)}
         self.tasks: dict[str, asyncio.Task] = {}
         for c in self.items.values():
             self._register(c)
@@ -68,7 +62,7 @@ class Computers:
                 c["status"] = "stopped"  # the backend restarted mid-way
 
     def save(self) -> None:
-        storage.write_json(self.path, list(self.items.values()))
+        storage.save_items(self.path, self.items.values())
 
     def _register(self, c: dict) -> None:
         manager.specs[sandbox_id(c["id"])] = {"memory": f"{c['memory']}g", "cpus": str(c["cpus"]),

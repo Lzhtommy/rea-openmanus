@@ -116,17 +116,12 @@ class Skills:
     def __init__(self):
         self.root = config.DATA_DIR / "skills"
         self.state_path = config.DATA_DIR / "skills.json"
-        self.state: dict[str, dict] = {}  # name -> {enabled, uses, source, repo, createdAt}
-        if self.state_path.exists():
-            try:
-                self.state = json.loads(self.state_path.read_text())
-            except ValueError:
-                self.state = {}
+        self.state: dict[str, dict] = storage.load_doc(self.state_path) or {}  # name -> {enabled, uses, source, repo, createdAt}
         self.items: dict[str, Skill] = {}
         self.reload()
 
     def save(self) -> None:
-        storage.write_json(self.state_path, self.state)
+        storage.save_doc(self.state_path, self.state)
 
     def _load_dir(self, d: Path, source: str) -> Skill | None:
         f = d / "SKILL.md"
