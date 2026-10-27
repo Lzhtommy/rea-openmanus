@@ -210,13 +210,13 @@ async def test_full_task(store, monkeypatch):
     await sb.call("/shell/kill", {"id": "srv"})
 
     # files the agent wrote / delivered are kept outside the sandbox and outlive it
-    from app import main
+    from app import routes
     kept = [f for f in s.files.values() if f["filename"] == "report.md"]
     assert kept and set(kept[0]["kinds"]) == {"edited", "deliverable"}
     await manager.destroy(s.session_id)
-    r = await main.download(s.session_id, kept[0]["path"])
+    r = await routes.sessions.download(s.session_id, kept[0]["path"])
     assert r.status_code == 200 and "# Report" in open(r.path).read()
-    lib = await main.library()
+    lib = await routes.live.library()
     assert any(x["sessionId"] == s.session_id and x["filename"] == "report.md" for x in lib)
 
 
@@ -436,7 +436,7 @@ async def test_share_link(store):
     """A share link exposes the task read-only, with file access scoped to that task, until revoked."""
     import json as _json
     from fastapi import HTTPException
-    from app import main
+    from app import routes
     s = store.create()
     sb = await manager.get(s.session_id)
     path = f"{sb.workdir}/report.md"
@@ -444,17 +444,17 @@ async def test_share_link(store):
     await s.keep_file(path, "deliverable")
     await s.emit({"type": "chat", "sender": "assistant", "messageType": "text", "content": "done",
                   "attachments": [{"path": path, "filename": "report.md", "url": s.file_url(path)}]})
-    token = (await main.create_share(s.session_id))["token"]
-    assert (await main.create_share(s.session_id))["token"] == token  # idempotent
-    body = _json.loads((await main.get_share(token)).body)
+    token = (await routes.share.create_share(s.session_id))["token"]
+    assert (await routes.share.create_share(s.session_id))["token"] == token  # idempotent
+    body = _json.loads((await routes.share.get_share(token)).body)
     url = body["events"][-1]["attachments"][0]["url"]
     assert url.startswith(f"/api/share/{token}/files") and "/api/sessions/" not in _json.dumps(body)
-    assert (await main.share_file(token, path)).status_code == 200
+    assert (await routes.share.share_file(token, path)).status_code == 200
     with pytest.raises(HTTPException):
-        await main.share_file(token, "/etc/passwd")
-    await main.revoke_share(s.session_id)
+        await routes.share.share_file(token, "/etc/passwd")
+    await routes.share.revoke_share(s.session_id)
     with pytest.raises(HTTPException):
-        await main.get_share(token)
+        await routes.share.get_share(token)
 
 
 @pytest.mark.asyncio
@@ -510,7 +510,7 @@ async def test_map_reduce_controls(store, monkeypatch):
 @pytest.mark.asyncio
 async def test_project_context(store, monkeypatch, tmp_path):
     """A task in a project gets the project's instructions and a copy of its files in the sandbox."""
-    from app import main, projects
+    from app import projects, routes
     projects.store = projects.Projects()
     monkeypatch.setattr(projects.store, "root", tmp_path / "projects")
     monkeypatch.setattr(projects.store, "path", tmp_path / "projects.json")
@@ -518,7 +518,7 @@ async def test_project_context(store, monkeypatch, tmp_path):
     projects.store.add_file(p["id"], "guide.md", "# 品牌色：深蓝".encode())
     model = ScriptedModel([msg(tool("file_read", file="project/guide.md")), msg(tool("idle"))])
     monkeypatch.setattr(llm, "agent_step", model)
-    meta = await main.create_session({"projectId": p["id"]})
+    meta = await routes.sessions.create_session({"projectId": p["id"]})
     s = store.get(meta["id"])
     assert meta["projectId"] == p["id"]
     await s.user_message("写一段介绍", [])
@@ -571,11 +571,11 @@ def teardown_module():
 
 @pytest.mark.asyncio
 async def test_download_non_ascii_filename(store):
-    from app import main
+    from app import routes
     s = store.create()
     sb = await manager.get(s.session_id)
     await sb.call("/file/write", {"file": "无人机报告.md", "content": "# 报告"})
-    r = await main.download(s.session_id, f"{sb.workdir}/无人机报告.md")
+    r = await routes.sessions.download(s.session_id, f"{sb.workdir}/无人机报告.md")
     disp = r.headers["content-disposition"]
     disp.encode("latin-1")  # must be a valid header value
     assert "filename*=UTF-8''%E6%97%A0%E4%BA%BA%E6%9C%BA%E6%8A%A5%E5%91%8A.md" in disp
@@ -585,7 +585,7 @@ async def test_download_non_ascii_filename(store):
 @pytest.mark.asyncio
 async def test_personalization(store, monkeypatch, tmp_path):
     """Profile, custom instructions and accepted knowledge reach the agent; agent proposals wait for the user."""
-    from app import main, personal
+    from app import personal, routes
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     personal.store = personal.Personal()
     personal.store.update({"profile": {"nickname": "小李", "occupation": "无人机工程师"}, "instructions": "回答尽量简洁"})
@@ -602,7 +602,7 @@ async def test_personalization(store, monkeypatch, tmp_path):
     assert proposed["pending"] and "报告默认使用中文" not in personal.store.note()
     ev = next(e for e in s.events if e["type"] == "toolUsed" and e.get("name") == "knowledge_save" and e["status"] == "success")
     assert ev["detail"]["knowledge"]["id"] == proposed["id"]
-    await main.edit_knowledge(proposed["id"], {"accept": True})
+    await routes.personal.edit_knowledge(proposed["id"], {"accept": True})
     # the next run re-sends the note because it changed; unchanged notes are not repeated
     await s.user_message("继续", [])
     await wait_status(s, {"idle"})
@@ -689,7 +689,8 @@ async def test_search_variants(store, monkeypatch):
 async def test_triggers(store, monkeypatch, tmp_path):
     """Webhook and condition triggers start tasks; the watcher is read-only and carries state between checks."""
     import json as _json
-    from app import main, triggers as trig
+    from app import routes, triggers as trig
+    from fastapi import HTTPException
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     trig.triggers = t = trig.Triggers(store)
     from app import scheduler as sched
@@ -715,12 +716,12 @@ async def test_triggers(store, monkeypatch, tmp_path):
     async def body():
         return b'{"job": "build", "status": "failed"}'
     req.body = body
-    r = await main.webhook(hook["url"].rsplit("/", 1)[1], req)
+    r = await routes.automations.webhook(hook["url"].rsplit("/", 1)[1], req)
     s = store.get(r["sessionId"])
     await wait_status(s, {"idle"})
     assert s.trigger_id == hook["id"] and '"status": "failed"' in s.messages[0]["content"][0]["text"]
-    with pytest.raises(main.HTTPException):  # rate limit: one event per 5 s
-        await main.webhook(hook["url"].rsplit("/", 1)[1], req)
+    with pytest.raises(HTTPException):  # rate limit: one event per 5 s
+        await routes.automations.webhook(hook["url"].rsplit("/", 1)[1], req)
 
     cond = t.create({"kind": "condition", "title": "降价提醒", "prompt": "通知我降价了", "condition": "商品价格低于上次", "everyMinutes": 30})
     c1 = await t.check(cond["id"])
@@ -733,7 +734,7 @@ async def test_triggers(store, monkeypatch, tmp_path):
     run = store.get(c3["sessionId"])
     await wait_status(run, {"idle"})
     assert "现价 349" in run.messages[0]["content"][0]["text"]
-    activity = await main.automation_activity()
+    activity = await routes.automations.automation_activity()
     assert {a["type"] for a in activity} == {"run", "check"}
     with pytest.raises(trig.TriggerError):
         t.create({"kind": "condition", "prompt": "x", "condition": "y", "everyMinutes": 1})
@@ -810,7 +811,7 @@ async def test_slides_and_media(store, monkeypatch):
 async def test_publish_site(store, monkeypatch, tmp_path):
     """deploy_publish copies a site out of the sandbox; it is served on its own host, versioned, and isolated."""
     import pathlib
-    from app import main, sites
+    from app import routes, sites
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "CONFIRM_ENABLED", False)
     sites.store = sites.Sites()
@@ -834,20 +835,20 @@ async def test_publish_site(store, monkeypatch, tmp_path):
     assert len(sites.store.items) == 1 and site["current"] == 2 and site["kind"] == "game"
     assert site["slug"].startswith("snake-game-") and pubs[0]["detail"]["site"]["url"].startswith(f"http://{site['slug']}.")
     assert not (sites.store.root / site["id"] / "v1" / "node_modules").exists()
-    page = main._serve_site(site["slug"], "", sandboxed=False)
+    page = routes.common.serve_site(site["slug"], "", sandboxed=False)
     assert page.status_code == 200 and "content-security-policy" not in page.headers
     assert b"v2" in pathlib.Path(page.path).read_bytes()
-    assert "sandbox" in main._serve_site(site["slug"], "app.js", sandboxed=True).headers["content-security-policy"]
-    assert main._serve_site(site["slug"], "../../sites.json", sandboxed=False).status_code == 404
-    assert pathlib.Path(main._serve_site(site["slug"], "some/route", sandboxed=False).path).name == "index.html"  # SPA
+    assert "sandbox" in routes.common.serve_site(site["slug"], "app.js", sandboxed=True).headers["content-security-policy"]
+    assert routes.common.serve_site(site["slug"], "../../sites.json", sandboxed=False).status_code == 404
+    assert pathlib.Path(routes.common.serve_site(site["slug"], "some/route", sandboxed=False).path).name == "index.html"  # SPA
     sites.store.update(site["id"], {"current": 1})
-    assert b"v1" in pathlib.Path(main._serve_site(site["slug"], "index.html", sandboxed=False).path).read_bytes()
+    assert b"v1" in pathlib.Path(routes.common.serve_site(site["slug"], "index.html", sandboxed=False).path).read_bytes()
 
 
 @pytest.mark.asyncio
 async def test_cloud_computer(store, monkeypatch, tmp_path):
     """Tasks on a computer share its sandbox; the idle reaper leaves it running unless auto-stop is set."""
-    from app import computers, main
+    from app import computers, routes
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     computers.store = computers.Computers()
     c = computers.store.create({"template": "custom", "name": "我的服务器", "cpus": 2, "memory": 4})
@@ -856,10 +857,10 @@ async def test_cloud_computer(store, monkeypatch, tmp_path):
     model = ScriptedModel([msg(tool("file_write", file="notes.txt", content="from task 1")), msg(tool("idle")),
                            msg(tool("file_read", file="notes.txt")), msg(tool("idle"))])
     monkeypatch.setattr(llm, "agent_step", model)
-    a = store.get((await main.create_session({"computerId": c["id"]}))["id"])
+    a = store.get((await routes.sessions.create_session({"computerId": c["id"]}))["id"])
     await a.user_message("写个文件", [])
     await wait_status(a, {"idle"})
-    b = store.get((await main.create_session({"computerId": c["id"]}))["id"])
+    b = store.get((await routes.sessions.create_session({"computerId": c["id"]}))["id"])
     await b.user_message("读那个文件", [])
     await wait_status(b, {"idle"})
     read = next(e for e in b.events if e.get("name") == "file_read" and e["status"] == "success")
@@ -872,7 +873,7 @@ async def test_cloud_computer(store, monkeypatch, tmp_path):
     with pytest.raises(computers.ComputerError):
         computers.store.update(c["id"], {"ports": [{"port": 8080}]})
     assert computers.store.update(c["id"], {"ports": [{"port": 3000}]})["ports"][0]["url"].startswith(f"http://pc-{c['id']}-3000.")
-    await main.delete_computer(c["id"])
+    await routes.computers.delete_computer(c["id"])
     assert sbid not in manager.sandboxes and a.computer_id is None
 
 
@@ -881,7 +882,7 @@ async def test_device_tunnel(store, monkeypatch, tmp_path):
     """A task on a connected device reaches its action server through the tunnel; commands need approval."""
     import base64 as b64
     import json as _json
-    from app import devices, main
+    from app import devices, routes
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     devices.store = devices.Devices()
     d, token = devices.store.create("测试笔记本")
@@ -897,7 +898,7 @@ async def test_device_tunnel(store, monkeypatch, tmp_path):
     model = ScriptedModel([msg(tool("shell_exec", command="echo from-the-device")),
                            msg(tool("file_write", file="note.txt", content="hi")), msg(tool("idle"))])
     monkeypatch.setattr(llm, "agent_step", model)
-    s = store.get((await main.create_session({"deviceId": d["id"]}))["id"])
+    s = store.get((await routes.sessions.create_session({"deviceId": d["id"]}))["id"])
     assert s.sandbox_id == f"dev-{d['id']}"
     await s.user_message("看看我的电脑", [])
     done = set()
@@ -927,7 +928,7 @@ async def test_device_tunnel(store, monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_skill_recorder(store, monkeypatch, tmp_path):
     """Demonstrated browser steps (minus secrets) reach the model, which drafts a skill; the browser is cleaned up."""
-    from app import main, recordings
+    from app import recordings, routes
     recordings.store = recordings.Recordings()
     page = tmp_path / "form.html"
     page.write_text("<title>t</title><input name=q placeholder='关键词'><input type=password name=pw><button>搜索</button>")
@@ -938,14 +939,14 @@ async def test_skill_recorder(store, monkeypatch, tmp_path):
         return {"name": "search-flow", "title": "搜索流程", "description": "MUST read before searching.", "summary": "s",
                 "categories": ["自动化"], "body": "1. 打开页面"}
     monkeypatch.setattr(llm, "draft_recorded_skill", fake_draft)
-    r = await main.start_recording({"target": "cloud", "url": f"file://{page}"})
+    r = await routes.recordings.start_recording({"target": "cloud", "url": f"file://{page}"})
     sb = manager.sandboxes[f"rec-{r['id']}"]
     await sb.call("/browser/view")
     await sb.call("/browser/input", {"index": 0, "text": "无人机", "press_enter": False})
     await sb.call("/browser/input", {"index": 1, "text": "s3cret", "press_enter": False})
     await sb.call("/browser/click", {"index": 2})
-    assert (await main.recording_events(r["id"]))["count"] >= 3
-    out = await main.stop_recording(r["id"], {"notes": "每次搜索不同的关键词"})
+    assert (await routes.recordings.recording_events(r["id"]))["count"] >= 3
+    out = await routes.recordings.stop_recording(r["id"], {"notes": "每次搜索不同的关键词"})
     assert out["draft"]["name"] == "search-flow" and "每次搜索" in seen["notes"]
     assert "无人机" in seen["steps"] and "s3cret" not in seen["steps"] and "<secret" in seen["steps"]
     assert f"rec-{r['id']}" not in manager.sandboxes  # the recording browser is gone
@@ -955,7 +956,7 @@ async def test_skill_recorder(store, monkeypatch, tmp_path):
 async def test_agent_team(store, monkeypatch, tmp_path):
     """A team task: the lead sees the roster and delegates to members, who run in their own roles in parallel."""
     import time as _t
-    from app import agents, main
+    from app import agents, routes
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     agents.store = agents.Agents()
     lead = agents.store.create_agent({"name": "主编", "instructions": "统筹并汇总", "mode": "lite"})
@@ -980,7 +981,7 @@ async def test_agent_team(store, monkeypatch, tmp_path):
                        tool("agent_delegate", agent="路人", task="x"))
         return msg(tool("idle"))
     monkeypatch.setattr(llm, "agent_step", model)
-    s = store.get((await main.create_session({"teamId": team["id"]}))["id"])
+    s = store.get((await routes.sessions.create_session({"teamId": team["id"]}))["id"])
     assert s.agent_id == lead["id"] and s.model_selection == {"mode": "lite"}
     await s.user_message("写一篇行业短评", [])
     await wait_status(s, {"idle"})
@@ -1025,7 +1026,7 @@ async def test_plan_confirm_and_queue(store, monkeypatch):
 @pytest.mark.asyncio
 async def test_usage_and_promotions(store, monkeypatch):
     """Model usage and active time add up per task; a delivered report gets follow-up promotions."""
-    from app import main
+    from app import routes
     reply = msg(tool("file_write", file="report.md", content="# 报告"))
     reply.usage = {"input": 1200, "output": 300, "cached": 1000}
     model = ScriptedModel([reply, msg(tool("message_notify_user", text="完成", attachments=["report.md"], kind="result")),
@@ -1041,7 +1042,7 @@ async def test_usage_and_promotions(store, monkeypatch):
     assert s.usage["llmCalls"] == 3 and s.usage["input"] == 1200 and s.usage["cached"] == 1000 and s.usage["activeMs"] > 0
     promos = [e for e in s.events if e["type"] == "fileOperationPromotion"]
     assert {p["suggestion"] for p in promos} == {"做成网页", "做成幻灯片"} and "report.md" in promos[0]["promptForAI"]
-    u = await main.usage()
+    u = await routes.data.usage()
     assert u["total"]["input"] >= 1200 and any(t["id"] == s.session_id for t in u["tasks"])
 
 

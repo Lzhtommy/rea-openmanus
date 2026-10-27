@@ -269,7 +269,9 @@ cd ../backend && uv sync && MANUS_SANDBOX=local uv run uvicorn app.main:app --po
 ```
 backend/
   app/
-    main.py         HTTP + WebSocket API、文件上传下载、端口预览代理
+    main.py         应用入口：启动与关闭、中间件（登录、站点域名、缓存）、挂载路由
+    routes/         HTTP + WebSocket 路由，按功能分模块（任务、实时事件流、自动化、账户……）
+    storage.py      持久化：data/manus.db（SQLite）和原子写文件
     session.py      会话：事件日志、LLM 历史、计划、收件箱、追问建议
     agent.py        Agent 循环、工具分发、可恢复压缩、Wide Research
     llm.py          模型客户端（Anthropic 块格式 ↔ OpenAI chat 格式）
